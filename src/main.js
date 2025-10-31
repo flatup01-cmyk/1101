@@ -4,6 +4,14 @@ import liff from '@line/liff'
 import { LIFF_CONFIG } from './config.js'
 import { uploadVideoToStorage } from './firebase.js'
 
+// XSS対策: HTMLエスケープ関数（グローバル）
+function escapeHtml(text) {
+  if (!text) return ''
+  const div = document.createElement('div')
+  div.textContent = text
+  return div.innerHTML
+}
+
 // LIFF初期化（エラーハンドリング強化版）
 async function initializeLIFF() {
   try {
@@ -80,7 +88,7 @@ function showErrorMessage(error) {
           <h1>NEW WORLD</h1>
           <div style="padding: 20px; background: rgba(255,0,0,0.1); border-radius: 10px; margin-top: 20px;">
             <h3>⚠️ エラーが発生しました</h3>
-            <p>${error.message}</p>
+            <p>${escapeHtml(error.message || '不明なエラーが発生しました')}</p>
           </div>
         </div>
       </div>
@@ -91,15 +99,16 @@ function showErrorMessage(error) {
   const errorDiv = document.createElement('div')
   errorDiv.className = 'error-message'
   errorDiv.style.cssText = 'padding: 20px; background: rgba(255,0,0,0.1); border-radius: 10px; margin: 20px;'
+  
   errorDiv.innerHTML = `
     <h3>⚠️ エラー: LIFF初期化に失敗しました</h3>
-    <p><strong>エラー内容:</strong> ${error.message}</p>
+    <p><strong>エラー内容:</strong> ${escapeHtml(error.message || '不明なエラー')}</p>
     <details style="margin-top: 10px;">
       <summary style="cursor: pointer; color: #fff; font-size: 0.9rem;">トラブルシューティング</summary>
       <ul style="margin-top: 10px; padding-left: 20px; font-size: 0.9rem;">
         <li>LINE Developersで以下を確認してください：<br>
           - LIFFアプリが作成されているか<br>
-          - LIFF IDが正しく設定されているか（現在: ${LIFF_CONFIG.liffId || '未設定'})<br>
+          - LIFF IDが正しく設定されているか（現在: ${escapeHtml(LIFF_CONFIG.liffId || '未設定')})<br>
           - アプリが公開状態になっているか</li>
         <li>このアプリはLINEアプリ内でのみ完全に動作します</li>
         <li>Netlifyの環境変数にVITE_LIFF_IDが設定されているか確認してください</li>
@@ -113,16 +122,24 @@ function showErrorMessage(error) {
 function initApp(profile) {
   console.log('App initialized for user:', profile.displayName)
   
-  // ユーザー名を表示
+  // AIKA18号の挨拶（ツンデレ口調）+ スカウター表示
   const userInfo = document.createElement('div')
   userInfo.className = 'user-info'
   userInfo.innerHTML = `
-    <p style="margin-top: 1rem; font-size: 0.9rem; opacity: 0.9;">
-      👋 ようこそ、<strong>${profile.displayName}</strong>さん
-    </p>
-    <p style="margin-top: 0.5rem; font-size: 0.8rem; opacity: 0.7;">
-      LIFFアプリが正常に起動しました
-    </p>
+    <div class="scouter-display" style="margin-top: 1rem; padding: 15px; background: rgba(0, 0, 0, 0.3); border-radius: 8px; border: 2px solid rgba(100, 200, 255, 0.5); font-family: 'Courier New', monospace;">
+      <div style="font-size: 0.75rem; color: #64c8ff; margin-bottom: 8px; text-align: left;">
+        ▸ FORM ANALYZE READY
+      </div>
+      <div style="font-size: 0.9rem; color: #ffeb3b; margin-bottom: 8px; text-align: left;">
+        ▸ POWER LEVEL: ??
+      </div>
+      <div style="font-size: 0.85rem; color: #fff; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(100, 200, 255, 0.3);">
+        ようこそ、<strong style="color: #64c8ff;">${escapeHtml(profile.displayName)}</strong>。<br>
+        <span style="font-size: 0.85rem; color: #ff9800; margin-top: 5px; display: block;">
+          …フン、そんな腕でどこまで通用するか、見定めてやる。
+        </span>
+      </div>
+    </div>
   `
   document.querySelector('.status')?.appendChild(userInfo)
   
@@ -160,9 +177,15 @@ function createVideoUploadUI(userId) {
   uploadSection.className = 'upload-section'
   uploadSection.style.cssText = 'margin-top: 2rem; padding: 1.5rem; background: rgba(255,255,255,0.15); border-radius: 10px;'
   uploadSection.innerHTML = `
-    <h3 style="margin-bottom: 1rem; font-size: 1.3rem;">🎥 動画をアップロード</h3>
-    <p style="margin-bottom: 1rem; font-size: 0.9rem; opacity: 0.9;">
-      あなたのキックボクシング動画をアップロードして、AIKAがフォームを分析します。
+    <div style="margin-bottom: 1rem; padding: 12px; background: rgba(0, 0, 0, 0.3); border-radius: 8px; border: 1px solid rgba(100, 200, 255, 0.4); font-family: 'Courier New', monospace;">
+      <div style="font-size: 0.75rem; color: #64c8ff; margin-bottom: 5px; text-align: left;">
+        ▸ VIDEO UPLOAD MODULE
+      </div>
+      <h3 style="margin-bottom: 0.8rem; font-size: 1.2rem; color: #fff;">🎯 動画アップロード</h3>
+    </div>
+    <p style="margin-bottom: 1rem; font-size: 0.95rem; opacity: 0.95; line-height: 1.6; padding: 10px; background: rgba(255, 255, 255, 0.1); border-radius: 6px;">
+      フン、動画をセットしろ。AIKA18号のバトルスコープが、アンタの戦闘力を採点してやるよ。…せいぜい頑張りな。<br>
+      <span style="font-size: 0.85rem; opacity: 0.8; color: #64c8ff;">(最大100MB)</span>
     </p>
     <input 
       type="file" 
@@ -175,7 +198,7 @@ function createVideoUploadUI(userId) {
       class="upload-button"
       style="width: 100%; padding: 12px 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; border-radius: 8px; color: white; font-size: 1rem; cursor: pointer; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.2);"
     >
-      📁 動画を選択
+      🎯 動画をセット
     </button>
     <div id="videoPreview" style="display: none; margin-top: 1rem;"></div>
     <div id="uploadProgress" style="display: none; margin-top: 1rem;"></div>
@@ -183,7 +206,7 @@ function createVideoUploadUI(userId) {
       id="uploadBtn" 
       style="display: none; width: 100%; margin-top: 1rem; padding: 12px 24px; background: rgba(255,255,255,0.2); border: 2px solid rgba(255,255,255,0.5); border-radius: 8px; color: white; font-size: 1rem; cursor: pointer; font-weight: bold;"
     >
-      ⬆️ アップロード開始
+      🚀 解析開始
     </button>
   `
   statusDiv.appendChild(uploadSection)
@@ -210,7 +233,7 @@ function createVideoUploadUI(userId) {
     // ファイルサイズチェック（100MB制限）
     const maxSize = 100 * 1024 * 1024 // 100MB
     if (file.size > maxSize) {
-      alert('ファイルサイズが大きすぎます。100MB以下の動画を選択してください。')
+      alert('…チッ、100MB以下の動画を選択しろよ。大きすぎて解析できやしないわ。')
       return
     }
     
@@ -240,19 +263,30 @@ function createVideoUploadUI(userId) {
     
     // UI更新
     uploadBtn.disabled = true
-    uploadBtn.textContent = '⏳ アップロード中...'
-    progressDiv.style.display = 'block'
-    progressDiv.innerHTML = '<p>アップロードを開始しています...</p>'
+    uploadBtn.textContent = '⏳ 解析準備中...'
+      progressDiv.style.display = 'block'
+      progressDiv.innerHTML = `
+        <div style="background: rgba(0, 0, 0, 0.4); border-radius: 8px; padding: 15px; border: 2px solid rgba(100, 200, 255, 0.5); font-family: 'Courier New', monospace;">
+          <div style="font-size: 0.75rem; color: #ff9800; margin-bottom: 8px; text-align: left;">
+            ▸ INITIALIZING ANALYSIS...
+          </div>
+          <div style="font-size: 0.85rem; color: #fff; margin-top: 5px;">
+            …解析を開始するわよ。ちょっと待ちなさい。
+          </div>
+        </div>
+      `
     
     try {
       // 進捗監視
       window.addEventListener('uploadProgress', (e) => {
         const progress = e.detail.progress
         progressDiv.innerHTML = `
-          <div style="background: rgba(255,255,255,0.2); border-radius: 8px; padding: 10px;">
-            <p style="margin-bottom: 5px;">アップロード中: ${Math.round(progress)}%</p>
-            <div style="background: rgba(255,255,255,0.3); border-radius: 4px; height: 8px; overflow: hidden;">
-              <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); height: 100%; width: ${progress}%; transition: width 0.3s;"></div>
+          <div style="background: rgba(0, 0, 0, 0.4); border-radius: 8px; padding: 15px; border: 2px solid rgba(100, 200, 255, 0.5); font-family: 'Courier New', monospace;">
+            <div style="font-size: 0.75rem; color: #64c8ff; margin-bottom: 8px; text-align: left;">
+              ▸ UPLOAD PROGRESS: ${Math.round(progress)}%
+            </div>
+            <div style="background: rgba(0, 0, 0, 0.5); border-radius: 4px; height: 12px; overflow: hidden; border: 1px solid rgba(100, 200, 255, 0.3); margin-top: 8px;">
+              <div style="background: linear-gradient(90deg, #64c8ff 0%, #64ff64 100%); height: 100%; width: ${progress}%; transition: width 0.3s; box-shadow: 0 0 10px rgba(100, 255, 255, 0.5);"></div>
             </div>
           </div>
         `
@@ -261,16 +295,21 @@ function createVideoUploadUI(userId) {
       // Firebase Storageにアップロード
       const downloadURL = await uploadVideoToStorage(selectedFile, userId)
       
-      // 成功メッセージ
+      // AIKA18号の成功メッセージ（ツンデレ口調）+ スカウター表示
       progressDiv.innerHTML = `
-        <div style="background: rgba(0,255,0,0.2); border-radius: 8px; padding: 15px; margin-top: 1rem;">
-          <h4 style="margin-bottom: 0.5rem;">✅ アップロード成功！</h4>
-          <p style="font-size: 0.9rem;">
-            AIKAがあなたの動画を分析中です。結果は数分後にLINEで届きます。
-          </p>
-          <p style="margin-top: 0.5rem; font-size: 0.8rem; opacity: 0.8;">
-            「ふふ、受け取ったわ。戦闘力を解析してあげる。結果は半日後に教えてあげるから、楽しみにしてなさい。」
-          </p>
+        <div style="background: rgba(0, 0, 0, 0.4); border-radius: 8px; padding: 15px; margin-top: 1rem; border: 2px solid rgba(0, 255, 100, 0.5); font-family: 'Courier New', monospace;">
+          <div style="font-size: 0.75rem; color: #64ff64; margin-bottom: 8px; text-align: left;">
+            ▸ DATA UPLOAD COMPLETE
+          </div>
+          <div style="font-size: 0.75rem; color: #64c8ff; margin-bottom: 8px; text-align: left;">
+            ▸ ANALYSIS IN PROGRESS...
+          </div>
+          <div style="font-size: 0.85rem; color: #fff; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(100, 255, 100, 0.3);">
+            …まあ、動画は受け取ったわよ。AIKA18号のバトルスコープが解析中よ。<br>
+            <span style="font-size: 0.8rem; color: #ff9800; margin-top: 5px; display: block;">
+              結果は数分後にLINEで届くわ。フン、せいぜい期待してなさいな。
+            </span>
+          </div>
         </div>
       `
       
@@ -282,7 +321,7 @@ function createVideoUploadUI(userId) {
         selectedFile = null
         previewDiv.style.display = 'none'
         progressDiv.innerHTML = ''
-        uploadBtn.textContent = '⬆️ アップロード開始'
+        uploadBtn.textContent = '🚀 解析開始'
         uploadBtn.disabled = false
         uploadBtn.style.display = 'none'
       }, 5000)
@@ -290,16 +329,23 @@ function createVideoUploadUI(userId) {
     } catch (error) {
       console.error('アップロードエラー:', error)
       progressDiv.innerHTML = `
-        <div style="background: rgba(255,0,0,0.2); border-radius: 8px; padding: 15px; margin-top: 1rem;">
-          <h4 style="margin-bottom: 0.5rem;">❌ アップロード失敗</h4>
-          <p style="font-size: 0.9rem;">${error.message}</p>
-          <p style="margin-top: 0.5rem; font-size: 0.8rem; opacity: 0.8;">
-            もう一度お試しください。
-          </p>
+        <div style="background: rgba(0, 0, 0, 0.4); border-radius: 8px; padding: 15px; margin-top: 1rem; border: 2px solid rgba(255, 100, 100, 0.5); font-family: 'Courier New', monospace;">
+          <div style="font-size: 0.75rem; color: #ff6464; margin-bottom: 8px; text-align: left;">
+            ▸ ERROR DETECTED
+          </div>
+          <div style="font-size: 0.85rem; color: #fff; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255, 100, 100, 0.3);">
+            …チッ、エラーよ。<br>
+            <span style="font-size: 0.8rem; color: #ff9800; margin-top: 5px; display: block;">
+              ${escapeHtml(error.message || '何か問題が発生したわ')}
+            </span>
+            <span style="font-size: 0.75rem; color: #64c8ff; margin-top: 8px; display: block;">
+              もう一度やり直しなさい。
+            </span>
+          </div>
         </div>
       `
       uploadBtn.disabled = false
-      uploadBtn.textContent = '⬆️ アップロード開始'
+      uploadBtn.textContent = '🚀 解析開始'
     }
   })
 }

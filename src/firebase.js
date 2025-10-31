@@ -15,10 +15,21 @@ export const storage = getStorage(app)
  */
 export async function uploadVideoToStorage(videoFile, userId) {
   try {
+    // セキュリティ: userIdの検証（英数字、ハイフン、アンダースコアのみ）
+    if (!userId || !/^[a-zA-Z0-9_-]+$/.test(userId)) {
+      throw new Error('不正なユーザーIDです')
+    }
+    
+    // セキュリティ: ファイル名の検証（パストラバーサル対策）
+    const originalFilename = videoFile.name || 'video.mp4'
+    // 危険な文字を除去（../など）
+    const sanitizedFilename = originalFilename.replace(/[^a-zA-Z0-9._-]/g, '_')
+    // ファイル名の長さ制限
+    const safeFilename = sanitizedFilename.length > 100 ? sanitizedFilename.substring(0, 100) : sanitizedFilename
+    
     // ファイル名を生成: {timestamp}-{originalFilename}
     const timestamp = Date.now()
-    const originalFilename = videoFile.name
-    const fileName = `${timestamp}-${originalFilename}`
+    const fileName = `${timestamp}-${safeFilename}`
     
     // ストレージパス: videos/{userID}/{timestamp}-{filename}
     const storagePath = `videos/${userId}/${fileName}`

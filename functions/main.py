@@ -15,6 +15,7 @@ import requests
 import base64
 from google.cloud import storage
 from analyze import analyze_kickboxing_form
+from rate_limiter import check_rate_limit
 
 # Firebase Functions Framework
 try:
@@ -46,8 +47,12 @@ def process_video(data, context):
     if isinstance(data, str):
         try:
             data = json.loads(base64.b64decode(data).decode('utf-8'))
-        except:
-            data = json.loads(data)
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as e:
+            try:
+                data = json.loads(data)
+            except json.JSONDecodeError:
+                print(f"データパースエラー: {str(e)}")
+                return {"status": "error", "reason": "invalid data format"}
     
     file_path = data.get('name') or data.get('file')  # 例: videos/user123/1234567890-video.mp4
     bucket_name = data.get('bucket', 'aikaapp-584fa.appspot.com')
@@ -56,19 +61,59 @@ def process_video(data, context):
     print(f"処理開始: {file_path} (bucket: {bucket_name})")
     
     # videos/で始まらないファイルは無視
-    if not file_path.startswith('videos/'):
+    if not file_path or not file_path.startswith('videos/'):
         print(f"スキップ: videos/で始まらないファイル: {file_path}")
         return {"status": "skipped", "reason": "not a video file"}
+    
+    # パストラバーサル攻撃対策: パスを正規化して検証
+    import os.path
+    normalized_path = os.path.normpath(file_path)
+    if not normalized_path.startswith('videos/'):
+        print(f"セキュリティ: 不正なパス: {file_path}")
+        return {"status": "error", "reason": "invalid path"}
+    
+    # ファイルパスからユーザーIDを抽出（レートリミットチェック用）
+    path_parts = file_path.split('/')
+    if len(path_parts) < 3:
+        print(f"セキュリティ: パス構造が不正: {file_path}")
+        return {"status": "error", "reason": "invalid path structure"}
+    
+    user_id = path_parts[1]
+    # ユーザーIDの検証（英数字とハイフン、アンダースコアのみ許可）
+    if not user_id or not user_id.replace('-', '').replace('_', '').isalnum():
+        print(f"セキュリティ: 不正なユーザーID: {user_id}")
+        return {"status": "error", "reason": "invalid user id"}
+    
+    # レートリミットチェック
+    is_allowed, rate_limit_message = check_rate_limit(user_id, 'upload_video')
+    if not is_allowed:
+        print(f"❌ レートリミット超過: {user_id} - {rate_limit_message}")
+        # ユーザーに通知
+        try:
+            send_line_message(user_id, f"ごめんあそばせ。{rate_limit_message}")
+        except Exception as notify_error:
+            print(f"レートリミット通知エラー: {str(notify_error)}")
+        return {
+            "status": "rate_limit_exceeded",
+            "reason": rate_limit_message
+        }
+    
+    print(f"✓ レートリミットチェック通過: {user_id}")
     
     # 2. 動画ファイルを一時ディレクトリにダウンロード
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(file_path)
     
     # 一時ファイルに保存
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as temp_file:
-        temp_path = temp_file.name
-        blob.download_to_filename(temp_path)
-        print(f"ダウンロード完了: {temp_path}")
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as temp_file:
+            temp_path = temp_file.name
+            blob.download_to_filename(temp_path)
+            print(f"ダウンロード完了: {temp_path}")
+    except Exception as download_error:
+        print(f"ファイルダウンロードエラー: {str(download_error)}")
+        return {"status": "error", "reason": "download failed"}
     
     try:
         # 3. 動画解析を実行
@@ -78,13 +123,7 @@ def process_video(data, context):
         if analysis_result['status'] != 'success':
             return analysis_result
         
-        # 4. ファイルパスからユーザーIDを抽出
-        # パス形式: videos/{userId}/{timestamp}-{filename}
-        path_parts = file_path.split('/')
-        user_id = path_parts[1] if len(path_parts) > 1 else 'unknown'
-        print(f"ユーザーID: {user_id}")
-        
-        # 5. Dify APIに送信してAIKAのセリフを生成
+        # 4. Dify APIに送信してAIKAのセリフを生成
         aika_message = call_dify_api(analysis_result['scores'], user_id)
         if not aika_message:
             print("⚠️ Dify APIからメッセージが取得できませんでした")
@@ -105,13 +144,11 @@ def process_video(data, context):
         import traceback
         traceback.print_exc()
         
-        # エラー時もユーザーに通知
+        # エラー時もユーザーに通知（user_idは既に抽出済み）
         try:
-            path_parts = file_path.split('/')
-            user_id = path_parts[1] if len(path_parts) > 1 else 'unknown'
             send_line_message(user_id, "ごめんあそばせ。今、スカウターの調子が悪いようだわ…後でもう一度試してみて。")
-        except:
-            pass
+        except Exception as notify_error:
+            print(f"LINE通知エラー: {str(notify_error)}")
         
         return {
             "status": "failure",
@@ -120,9 +157,12 @@ def process_video(data, context):
     
     finally:
         # 8. 一時ファイルを削除
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-            print(f"一時ファイル削除: {temp_path}")
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+                print(f"一時ファイル削除: {temp_path}")
+            except Exception as cleanup_error:
+                print(f"一時ファイル削除エラー: {str(cleanup_error)}")
 
 
 def call_dify_api(scores, user_id):
@@ -243,11 +283,12 @@ if functions_framework:
             try:
                 decoded_data = base64.b64decode(event_data).decode('utf-8')
                 event_data = json.loads(decoded_data)
-            except:
+            except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
                 # JSON文字列の場合
                 try:
                     event_data = json.loads(event_data)
-                except:
+                except json.JSONDecodeError:
+                    print("⚠️ CloudEventデータのパースに失敗しました")
                     event_data = {}
         
         # process_video関数を呼び出し
