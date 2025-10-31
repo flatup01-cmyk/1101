@@ -411,9 +411,10 @@ function createVideoUploadUI(userId) {
         console.log('🔧 開発モード: 実際のユーザーID:', actualUserId)
       }
       
-      // 進捗監視
+      // 進捗監視（アップロード開始前に設定）
       const progressHandler = (e) => {
-        const progress = e.detail.progress
+        const progress = e.detail.progress || 0
+        console.log('📊 進捗更新:', progress + '%')
         progressDiv.innerHTML = `
           <div style="background: rgba(0, 0, 0, 0.4); border-radius: 8px; padding: 15px; border: 2px solid rgba(100, 200, 255, 0.5); font-family: 'Courier New', monospace;">
             <div style="font-size: 0.75rem; color: #64c8ff; margin-bottom: 8px; text-align: left;">
@@ -426,6 +427,16 @@ function createVideoUploadUI(userId) {
         `
       }
       window.addEventListener('uploadProgress', progressHandler)
+      
+      // 初期進捗を表示（0%）
+      progressHandler({ detail: { progress: 0 } })
+      
+      console.log('🚀 アップロード開始:', {
+        fileName: selectedFile.name,
+        fileSize: selectedFile.size,
+        userId: actualUserId,
+        isDevMode: LIFF_CONFIG.isDevMode
+      })
       
       // Firebase Storageにアップロード
       const downloadURL = await uploadVideoToStorage(selectedFile, actualUserId)

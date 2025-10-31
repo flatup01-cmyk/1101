@@ -28,6 +28,29 @@ if (LIFF_CONFIG.isDevMode) {
  */
 export async function uploadVideoToStorage(videoFile, userId) {
   try {
+    console.log('📤 アップロード準備:', { userId, fileName: videoFile.name, fileSize: videoFile.size })
+    
+    // 認証状態を確認
+    if (auth.currentUser) {
+      console.log('✅ 認証済み:', auth.currentUser.uid)
+    } else {
+      console.warn('⚠️ 認証されていません。開発モードの場合、匿名認証を待機中...')
+      // 認証を待つ（開発モードの場合）
+      await new Promise((resolve, reject) => {
+        const unsubscribe = auth.onAuthStateChanged((user) => {
+          if (user) {
+            unsubscribe()
+            console.log('✅ 匿名認証完了:', user.uid)
+            resolve()
+          }
+        })
+        setTimeout(() => {
+          unsubscribe()
+          reject(new Error('認証タイムアウト'))
+        }, 10000)
+      })
+    }
+    
     // セキュリティ: userIdの検証（英数字、ハイフン、アンダースコアのみ）
     if (!userId || !/^[a-zA-Z0-9_-]+$/.test(userId)) {
       throw new Error('不正なユーザーIDです')
@@ -48,7 +71,10 @@ export async function uploadVideoToStorage(videoFile, userId) {
     const storagePath = `videos/${userId}/${fileName}`
     const storageRef = ref(storage, storagePath)
     
+    console.log('📁 ストレージパス:', storagePath)
+    
     // アップロード実行
+    console.log('🔄 アップロードタスク開始...')
     const uploadTask = uploadBytesResumable(storageRef, videoFile)
     
     // Promiseでラップして進捗を監視可能にする
@@ -56,30 +82,38 @@ export async function uploadVideoToStorage(videoFile, userId) {
       uploadTask.on(
         'state_changed',
         (snapshot) => {
-          // 進捗を更新（オプション）
-          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100
-          console.log(`アップロード進捗: ${Math.round(progress)}%`)
+          // 進捗を更新
+          const progress = snapshot.totalBytes > 0 
+            ? (snapshot.bytesTransferred / snapshot.totalBytes) * 100 
+            : 0
+          console.log(`📊 アップロード進捗: ${Math.round(progress)}% (${snapshot.bytesTransferred}/${snapshot.totalBytes})`)
           
-          // 必要に応じて進捗イベントを発火
+          // 進捗イベントを発火
           const event = new CustomEvent('uploadProgress', { 
             detail: { progress, snapshot } 
           })
           window.dispatchEvent(event)
         },
         (error) => {
-          console.error('アップロードエラー:', error)
+          console.error('❌ アップロードエラー:', error)
+          console.error('エラー詳細:', {
+            code: error.code,
+            message: error.message,
+            serverResponse: error.serverResponse
+          })
           reject(error)
         },
         async () => {
           // アップロード成功
+          console.log('✅ アップロード完了')
           const downloadURL = await getDownloadURL(uploadTask.snapshot.ref)
-          console.log('アップロード成功:', downloadURL)
+          console.log('📥 ダウンロードURL:', downloadURL)
           resolve(downloadURL)
         }
       )
     })
   } catch (error) {
-    console.error('Firebase Storage アップロード失敗:', error)
+    console.error('❌ Firebase Storage アップロード失敗:', error)
     throw error
   }
 }
