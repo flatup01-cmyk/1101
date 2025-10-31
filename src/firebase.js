@@ -4,20 +4,51 @@ import { getStorage, ref, uploadBytesResumable, getDownloadURL } from 'firebase/
 import { getAuth, signInAnonymously } from 'firebase/auth'
 import { FIREBASE_CONFIG, LIFF_CONFIG } from './config.js'
 
+// Firebase設定の検証
+if (!FIREBASE_CONFIG.apiKey || FIREBASE_CONFIG.apiKey.length < 10) {
+  console.error('❌ Firebase APIキーが設定されていません')
+  console.error('Netlifyの環境変数 VITE_FIREBASE_API_KEY を確認してください')
+}
+
 // Firebase初期化
-const app = initializeApp(FIREBASE_CONFIG)
-export const storage = getStorage(app)
-export const auth = getAuth(app)
+let app
+let storage
+let auth
+
+try {
+  app = initializeApp(FIREBASE_CONFIG)
+  storage = getStorage(app)
+  auth = getAuth(app)
+  console.log('✅ Firebase初期化成功')
+} catch (error) {
+  console.error('❌ Firebase初期化失敗:', error)
+  throw error
+}
+
+export { storage, auth }
 
 // 開発モードでFirebase匿名認証を実行
 if (LIFF_CONFIG.isDevMode) {
-  signInAnonymously(auth)
-    .then(() => {
-      console.log('✅ 開発モード: Firebase匿名認証成功')
-    })
-    .catch((error) => {
-      console.error('❌ 開発モード: Firebase匿名認証失敗:', error)
-    })
+  // 少し遅延させてから認証（Firebase初期化が確実に完了してから）
+  setTimeout(() => {
+    if (!auth.currentUser) {
+      signInAnonymously(auth)
+        .then(() => {
+          console.log('✅ 開発モード: Firebase匿名認証成功')
+          console.log('ユーザーID:', auth.currentUser.uid)
+        })
+        .catch((error) => {
+          console.error('❌ 開発モード: Firebase匿名認証失敗:', error)
+          console.error('エラー詳細:', {
+            code: error.code,
+            message: error.message
+          })
+          if (error.code === 'auth/api-key-not-valid') {
+            console.error('💡 解決方法: Netlifyの環境変数 VITE_FIREBASE_API_KEY を確認してください')
+          }
+        })
+    }
+  }, 500)
 }
 
 /**
