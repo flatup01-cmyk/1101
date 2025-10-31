@@ -70,7 +70,7 @@ def analyze_video(video_path):
 if __name__ == '__main__':
     # --- ここをあなたの動画ファイルへのパスに変更してください ---
     # 例: video_file = 'C:/Users/YourName/Videos/my_kick.mp4'
-    # 例: video_file = '/Users/YourName/Movies/my_kick.mp4'
+    # 例: video_file = '/U/Users/jin/Desktop/IMG_4735.MP4sers/YourName/Movies/my_kick.mp4'
     video_file = 'ここにあなたの動画ファイルのフルパスを記述してください.mp4' 
     
     if video_file == 'ここにあなたの動画ファイルのフルパスを記述してください.mp4':
