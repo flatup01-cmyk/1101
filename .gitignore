@@ -24,12 +24,14 @@ desktop.ini
 *.backup
 *~
 
-# Node.js（プロジェクトで使用する場合）
+# Node.js
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 package-lock.json
+.pnp
+.pnp.js
 
 # Python（プロジェクトで使用する場合）
 __pycache__/
@@ -49,8 +51,10 @@ ENV/
 
 # ビルド出力
 dist/
+dist-ssr/
 build/
 *.egg-info/
+*.local
 
 # キャッシュ
 .cache/

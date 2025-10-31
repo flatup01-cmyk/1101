@@ -1,0 +1,24 @@
+{
+  "name": "aika-battle-scouter",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "AIKA Battle Scouter - LIFFアプリケーション",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [
+    "liff",
+    "vite",
+    "kickboxing",
+    "aika"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "vite": "^5.4.0"
+  },
+  "dependencies": {}
+}
+
