@@ -3,6 +3,8 @@ import './style.css'
 import liff from '@line/liff'
 import { LIFF_CONFIG } from './config.js'
 import { uploadVideoToStorage } from './firebase.js'
+import { displayAikaReaction, applyAikaImageAnimation, createScoreDisplayArea, getAikaReaction } from './aika-animations.js'
+import { testAikaReactions } from './test-score-display.js'
 
 // XSS対策: HTMLエスケープ関数（グローバル）
 function escapeHtml(text) {
@@ -12,9 +14,39 @@ function escapeHtml(text) {
   return div.innerHTML
 }
 
+// 開発モード用のモックユーザー情報（通常のブラウザでも動作させるため）
+function createMockProfile() {
+  return {
+    userId: 'dev_user_' + Date.now(),
+    displayName: 'テストユーザー（開発モード）',
+    pictureUrl: '',
+    statusMessage: '開発モードで実行中'
+  }
+}
+
 // LIFF初期化（エラーハンドリング強化版）
 async function initializeLIFF() {
   try {
+    // URLパラメータを直接チェック（デプロイが完了していない場合のフォールバック）
+    const urlParams = new URLSearchParams(window.location.search)
+    const urlDevMode = urlParams.get('dev') === 'true'
+    const configDevMode = LIFF_CONFIG.isDevMode || import.meta.env.DEV
+    
+    // 開発モードのチェック（通常のブラウザでも動作させる）
+    if (urlDevMode || configDevMode) {
+      console.log('🔧 開発モード検出:', {
+        urlDevMode,
+        configDevMode,
+        currentUrl: window.location.href
+      })
+      
+      // モックユーザー情報でアプリを起動
+      const mockProfile = createMockProfile()
+      console.log('✅ 開発モードで初期化:', mockProfile)
+      initApp(mockProfile)
+      return
+    }
+
     // LIFF IDが設定されているか確認
     if (!LIFF_CONFIG.liffId) {
       console.warn('LIFF IDが設定されていません。')
@@ -22,6 +54,13 @@ async function initializeLIFF() {
       showFallbackMessage('LIFF IDが設定されていません。Netlifyの環境変数設定を確認してください。')
       return
     }
+
+    // 環境診断情報
+    console.log('🔍 LIFF環境診断:', {
+      userAgent: navigator.userAgent,
+      url: window.location.href,
+      liffId: LIFF_CONFIG.liffId
+    })
 
     // LIFF初期化（タイムアウト付き）
     const initPromise = liff.init({ liffId: LIFF_CONFIG.liffId })
@@ -31,31 +70,85 @@ async function initializeLIFF() {
     
     await Promise.race([initPromise, timeoutPromise])
     
+    // 初期化後の状態を確認
+    console.log('✅ LIFF初期化成功:', {
+      isLoggedIn: liff.isLoggedIn(),
+      isInClient: liff.isInClient(),
+      os: liff.getOS(),
+      language: liff.getLanguage(),
+      version: liff.getVersion()
+    })
+    
     // LIFFがロードされたか確認
     if (!liff.isLoggedIn()) {
       // ログインしていない場合はログインページへ（LINEアプリ内でのみ）
       if (liff.isInClient()) {
+        console.log('🔐 LINEアプリ内でログインを試みます...')
         liff.login()
         return
       } else {
-        // ブラウザ環境ではフォールバック表示
-        showFallbackMessage('このアプリはLINEアプリ内でのみ動作します。')
+        // ブラウザ環境では詳細な診断情報と共にフォールバック表示
+        const currentUrl = window.location.href
+        const devModeUrl = currentUrl.includes('?') 
+          ? currentUrl + '&dev=true'
+          : currentUrl + '?dev=true'
+        
+        const diagnosticInfo = `
+          <div style="margin-top: 15px; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 8px; font-size: 0.9rem;">
+            <strong>📋 診断情報:</strong><br>
+            • URL: ${escapeHtml(window.location.href)}<br>
+            • User Agent: ${escapeHtml(navigator.userAgent.substring(0, 100))}...<br>
+            • LIFF ID: ${escapeHtml(LIFF_CONFIG.liffId)}<br><br>
+            <strong>💡 解決方法（2つの選択肢）:</strong><br><br>
+            <strong>方法1: LINEアプリ内で開く（推奨）</strong><br>
+            1. PC版LINEデスクトップアプリを起動してください<br>
+            2. LINEアプリ内で自分にメッセージを送信してください<br>
+            3. 以下のURLを貼り付けて、LINEアプリ内でクリックしてください:<br>
+            <code style="background: rgba(255,255,255,0.1); padding: 5px; border-radius: 4px; display: inline-block; margin-top: 5px; margin-bottom: 15px;">
+              https://liff.line.me/2008276179-XxwM2QQD
+            </code><br><br>
+            <strong>方法2: 開発モードで動作させる（通常のブラウザでも動作）</strong><br>
+            以下のURLをクリックすると、通常のブラウザでも動作します（開発モード）:<br>
+            <a href="${escapeHtml(devModeUrl)}" style="color: #64c8ff; text-decoration: underline; display: inline-block; margin-top: 5px;">
+              ${escapeHtml(devModeUrl)}
+            </a><br>
+            <small style="opacity: 0.7; margin-top: 5px; display: block;">
+              ⚠️ 開発モードでは一部機能が制限されます（動画アップロードは動作します）
+            </small>
+          </div>
+        `
+        showFallbackMessage('このアプリはLINEアプリ内でのみ動作します。' + diagnosticInfo)
         return
       }
     }
 
     // ユーザー情報を取得
     const profile = await liff.getProfile()
-    console.log('LIFF initialized successfully', profile)
+    console.log('✅ LIFF initialized successfully', profile)
     
     // アプリケーションを起動
     initApp(profile)
     
   } catch (error) {
-    console.error('LIFF initialization failed:', error)
+    console.error('❌ LIFF initialization failed:', error)
+    
+    // 詳細な診断情報を含むエラーメッセージ
+    const diagnosticError = `
+      <div style="margin-top: 15px; padding: 15px; background: rgba(255,0,0,0.1); border-radius: 8px; font-size: 0.9rem;">
+        <strong>📋 診断情報:</strong><br>
+        • エラー: ${escapeHtml(error.message || '不明なエラー')}<br>
+        • URL: ${escapeHtml(window.location.href)}<br>
+        • User Agent: ${escapeHtml(navigator.userAgent.substring(0, 100))}...<br>
+        • LIFF ID: ${escapeHtml(LIFF_CONFIG.liffId || '未設定')}<br><br>
+        <strong>💡 確認事項:</strong><br>
+        1. LINEデスクトップアプリ内で開いていますか？<br>
+        2. LIFF URLをLINEアプリ内でクリックしましたか？<br>
+        3. 通常のブラウザ（Chrome/Safari）で開いていませんか？<br>
+      </div>
+    `
     
     // エラーでも白い画面にならないようにフォールバック表示
-    showErrorMessage(error)
+    showErrorMessage(new Error(error.message + diagnosticError))
   }
 }
 
@@ -66,10 +159,10 @@ function showFallbackMessage(message) {
   
   const fallbackDiv = document.createElement('div')
   fallbackDiv.className = 'fallback-message'
-  fallbackDiv.style.cssText = 'padding: 20px; background: rgba(255,255,255,0.1); border-radius: 10px; margin: 20px;'
+  fallbackDiv.style.cssText = 'padding: 20px; background: rgba(255,255,255,0.1); border-radius: 10px; margin: 20px; color: #fff;'
   fallbackDiv.innerHTML = `
     <h3>ℹ️ 情報</h3>
-    <p style="margin-top: 10px;">${message}</p>
+    <div style="margin-top: 10px;">${message}</div>
     <p style="margin-top: 10px; font-size: 0.9rem; opacity: 0.8;">
       アプリは正常に読み込まれましたが、LIFFの初期化には追加設定が必要です。
     </p>
@@ -100,9 +193,13 @@ function showErrorMessage(error) {
   errorDiv.className = 'error-message'
   errorDiv.style.cssText = 'padding: 20px; background: rgba(255,0,0,0.1); border-radius: 10px; margin: 20px;'
   
+  // エラーメッセージから診断情報を抽出（HTMLが含まれている場合）
+  const errorMessage = error.message || '不明なエラー'
+  const hasDiagnostics = errorMessage.includes('<div')
+  
   errorDiv.innerHTML = `
     <h3>⚠️ エラー: LIFF初期化に失敗しました</h3>
-    <p><strong>エラー内容:</strong> ${escapeHtml(error.message || '不明なエラー')}</p>
+    ${hasDiagnostics ? errorMessage : `<p><strong>エラー内容:</strong> ${escapeHtml(errorMessage)}</p>`}
     <details style="margin-top: 10px;">
       <summary style="cursor: pointer; color: #fff; font-size: 0.9rem;">トラブルシューティング</summary>
       <ul style="margin-top: 10px; padding-left: 20px; font-size: 0.9rem;">
@@ -112,6 +209,14 @@ function showErrorMessage(error) {
           - アプリが公開状態になっているか</li>
         <li>このアプリはLINEアプリ内でのみ完全に動作します</li>
         <li>Netlifyの環境変数にVITE_LIFF_IDが設定されているか確認してください</li>
+        <li><strong>PC版LINEで使用する場合:</strong><br>
+          1. LINEデスクトップアプリを起動<br>
+          2. 自分にメッセージを送る<br>
+          3. LIFF URLを貼り付けて、LINEアプリ内でクリック<br>
+          <code style="background: rgba(255,255,255,0.1); padding: 5px; border-radius: 4px; display: inline-block; margin-top: 5px;">
+            https://liff.line.me/2008276179-XxwM2QQD
+          </code>
+        </li>
       </ul>
     </details>
   `
@@ -153,15 +258,18 @@ function initApp(profile) {
         <li>LIFF ID: ${LIFF_CONFIG.liffId ? '✓ 設定済み' : '✗ 未設定'}</li>
         <li>Firebase: ${window.firebase ? '✓ 初期化済み' : '未初期化'}</li>
       </ul>
-      <p style="margin-top: 10px; font-size: 0.75rem; opacity: 0.8;">
-        動画アップロード機能の実装をお待ちください
-      </p>
     `
     document.querySelector('.status')?.appendChild(configStatus)
+    
+    // 開発環境でのみテスト機能を有効化
+    setTimeout(() => testAikaReactions(), 1000)
   }
   
   // 動画アップロードUIを追加
   createVideoUploadUI(profile.userId)
+  
+  // スコア表示エリアを作成
+  createScoreDisplayArea()
 
   // ランドマークデータを分析して表示
   analyzeAndDisplayLandmarks()
@@ -313,6 +421,9 @@ function createVideoUploadUI(userId) {
         </div>
       `
       
+      // AIKA画像に解析中アニメーション（軽く）
+      applyAikaImageAnimation('', 0) // 一時的にアニメーション解除
+      
       uploadBtn.style.display = 'none'
       
       // リセット準備
@@ -404,6 +515,12 @@ async function analyzeAndDisplayLandmarks() {
 // DOMContentLoaded時にLIFFを初期化
 document.addEventListener('DOMContentLoaded', () => {
   console.log('DOM loaded')
+  console.log('🔍 開発モードチェック:', {
+    url: window.location.href,
+    devParam: new URLSearchParams(window.location.search).get('dev'),
+    isDevMode: LIFF_CONFIG.isDevMode,
+    isDevelopment: import.meta.env.DEV
+  })
   
   // 少し遅延させてから初期化（DOMが確実に準備されていることを確認）
   setTimeout(() => {

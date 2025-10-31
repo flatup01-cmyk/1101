@@ -1,12 +1,23 @@
 // LIFFアプリの設定ファイル
 // 環境変数から読み込み（Viteでは VITE_ プレフィックスが必要）
 
+// URLパラメータから開発モードを確認（通常のブラウザでも動作させるため）
+// windowオブジェクトはブラウザ環境でのみ利用可能
+let isDevMode = false
+if (typeof window !== 'undefined') {
+  const urlParams = new URLSearchParams(window.location.search)
+  isDevMode = urlParams.get('dev') === 'true' || import.meta.env.DEV
+}
+
 export const LIFF_CONFIG = {
   // LINE Developersで取得したLIFF ID
   liffId: import.meta.env.VITE_LIFF_ID || '',
   
   // 開発環境かどうか
   isDevelopment: import.meta.env.DEV,
+  
+  // 開発モード（通常のブラウザでも動作）
+  isDevMode: isDevMode,
 }
 
 // Firebase設定（動画アップロード用）
