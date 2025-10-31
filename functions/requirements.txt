@@ -1,0 +1,12 @@
+# Cloud Functionsで必要なPythonライブラリ
+
+# 動画処理
+opencv-python==4.12.0.88
+mediapipe==0.10.14
+
+# Google Cloud Storage操作
+google-cloud-storage==2.18.2
+
+# HTTPリクエスト（Dify API、LINE API用）
+requests==2.31.0
+

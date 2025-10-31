@@ -1,7 +1,7 @@
-
 import cv2
 import mediapipe as mp
 import sys
+import json
 
 # MediaPipeの描画ユーティリティとPoseモデルを準備
 mp_drawing = mp.solutions.drawing_utils
@@ -9,13 +9,12 @@ mp_pose = mp.solutions.pose
 
 def analyze_video(video_path):
     """
-    動画ファイルを解析し、骨格情報をコンソールに出力します。
+    動画ファイルを解析し、骨格情報をJSONファイルに出力します。
 
-    Args:/Users/jin/Downloads/IMG_9127-1.mov
+    Args:
         video_path (str): 解析したい動画ファイルのパス
     """
     # Poseモデルを初期化
-    # `with`を使うと、処理が終わった後にリソースを自動で解放してくれます。
     with mp_pose.Pose(
         min_detection_confidence=0.5,  # 検出の信頼度の最小値
         min_tracking_confidence=0.5) as pose: # 追跡の信頼度の最小値
@@ -29,6 +28,7 @@ def analyze_video(video_path):
             return
 
         frame_count = 0
+        all_landmarks = []
         while cap.isOpened():
             # 1フレームずつ読み込む
             success, image = cap.read()
@@ -37,7 +37,6 @@ def analyze_video(video_path):
                 break
 
             frame_count += 1
-            print(f"--- フレーム {frame_count} ---")
 
             # パフォーマンス向上のため、画像を書き込み不可にして参照渡しにする
             image.flags.writeable = False
@@ -48,29 +47,22 @@ def analyze_video(video_path):
             # Poseモデルで画像（フレーム）を処理
             results = pose.process(image_rgb)
 
-            # 検出された骨格情報を出力
+            # 検出された骨格情報をリストに追加
             if results.pose_landmarks:
-                print(results.pose_landmarks)
-                
-                # (参考) 骨格を画像に描画したい場合は、以下のコメントを外してください
-                # image.flags.writeable = True
-                # mp_drawing.draw_landmarks(
-                #     image,
-                #     results.pose_landmarks,
-                #     mp_pose.POSE_CONNECTIONS)
-                # cv2.imshow('MediaPipe Pose', image)
-                # if cv2.waitKey(5) & 0xFF == 27:
-                #      break
-
+                landmarks = [{'x': lm.x, 'y': lm.y, 'z': lm.z, 'visibility': lm.visibility} for lm in results.pose_landmarks.landmark]
+                all_landmarks.append({'frame': frame_count, 'landmarks': landmarks})
 
         # 使い終わったリソースを解放
         cap.release()
-        # cv2.destroyAllWindows() # プレビューウィンドウを使っている場合はこちらも
+
+        # 骨格情報をJSONファイルに保存
+        with open('public/landmarks.json', 'w') as f:
+            json.dump(all_landmarks, f, indent=2)
+        print("骨格情報が public/landmarks.json に保存されました。")
+
 
 if __name__ == '__main__':
     # --- ここをあなたの動画ファイルへのパスに変更してください ---
-    # 例: video_file = 'C:/Users/YourName/Videos/my_kick.mp4'
-    # 例: video_file = '/U/Users/jin/Desktop/IMG_4735.MP4sers/YourName/Movies/my_kick.mp4'
     video_file = '/Users/jin/Downloads/IMG_9127-1.mov'
     
     if video_file == 'ここにあなたの動画ファイルのフ/Users/jin/Downloads/IMG_9127-1.movルパスを記述してください.mp4':
