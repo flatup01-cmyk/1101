@@ -11,7 +11,7 @@ def analyze_video(video_path):
     """
     動画ファイルを解析し、骨格情報をコンソールに出力します。
 
-    Args:
+    Args:/Users/jin/Downloads/IMG_9127-1.mov
         video_path (str): 解析したい動画ファイルのパス
     """
     # Poseモデルを初期化
@@ -40,7 +40,7 @@ def analyze_video(video_path):
             print(f"--- フレーム {frame_count} ---")
 
             # パフォーマンス向上のため、画像を書き込み不可にして参照渡しにする
-            image.flags.setflags(write=False)
+            image.flags.writeable = False
             
             # MediaPipeが処理できるように、色の形式をBGRからRGBに変換
             image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -53,7 +53,7 @@ def analyze_video(video_path):
                 print(results.pose_landmarks)
                 
                 # (参考) 骨格を画像に描画したい場合は、以下のコメントを外してください
-                # image.flags.setflags(write=True)
+                # image.flags.writeable = True
                 # mp_drawing.draw_landmarks(
                 #     image,
                 #     results.pose_landmarks,
@@ -71,9 +71,9 @@ if __name__ == '__main__':
     # --- ここをあなたの動画ファイルへのパスに変更してください ---
     # 例: video_file = 'C:/Users/YourName/Videos/my_kick.mp4'
     # 例: video_file = '/U/Users/jin/Desktop/IMG_4735.MP4sers/YourName/Movies/my_kick.mp4'
-    video_file = 'ここにあなたの動画ファイルのフルパスを記述してください.mp4' 
+    video_file = '/Users/jin/Downloads/IMG_9127-1.mov'
     
-    if video_file == 'ここにあなたの動画ファイルのフルパスを記述してください.mp4':
+    if video_file == 'ここにあなたの動画ファイルのフ/Users/jin/Downloads/IMG_9127-1.movルパスを記述してください.mp4':
         print("エラー: スクリプトを編集して、`video_file`変数をあなたの動画ファイルのパスに設定してください。", file=sys.stderr)
     else:
         analyze_video(video_file)

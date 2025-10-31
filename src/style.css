@@ -32,6 +32,36 @@ h1 {
   opacity: 0.9;
 }
 
+.aika-image-wrapper {
+  margin: 2rem 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.aika-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  max-height: 400px;
+  object-fit: contain;
+}
+
+@media (max-width: 768px) {
+  .aika-image {
+    max-height: 300px;
+  }
+  
+  h1 {
+    font-size: 2rem;
+  }
+  
+  .subtitle {
+    font-size: 1rem;
+  }
+}
+
 .status {
   background: rgba(255, 255, 255, 0.2);
   backdrop-filter: blur(10px);
