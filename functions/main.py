@@ -12,8 +12,16 @@ import os
 import json
 import tempfile
 import requests
+import base64
 from google.cloud import storage
 from analyze import analyze_kickboxing_form
+
+# Firebase Functions Framework
+try:
+    import functions_framework
+except ImportError:
+    # ローカル開発時はスキップ
+    functions_framework = None
 
 # Cloud Storageクライアント
 storage_client = storage.Client()
@@ -34,11 +42,23 @@ def process_video(data, context):
     """
     
     # 1. ファイル情報を取得
-    file_path = data['name']  # 例: videos/user123/1234567890-video.mp4
-    bucket_name = data['bucket']
+    # データがdictの場合はそのまま、Base64の場合はデコード
+    if isinstance(data, str):
+        try:
+            data = json.loads(base64.b64decode(data).decode('utf-8'))
+        except:
+            data = json.loads(data)
+    
+    file_path = data.get('name') or data.get('file')  # 例: videos/user123/1234567890-video.mp4
+    bucket_name = data.get('bucket', 'aikaapp-584fa.appspot.com')
     
     # デバッグ用ログ
-    print(f"処理開始: {file_path}")
+    print(f"処理開始: {file_path} (bucket: {bucket_name})")
+    
+    # videos/で始まらないファイルは無視
+    if not file_path.startswith('videos/'):
+        print(f"スキップ: videos/で始まらないファイル: {file_path}")
+        return {"status": "skipped", "reason": "not a video file"}
     
     # 2. 動画ファイルを一時ディレクトリにダウンロード
     bucket = storage_client.bucket(bucket_name)
@@ -82,6 +102,9 @@ def process_video(data, context):
         
     except Exception as e:
         print(f"エラー発生: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        
         # エラー時もユーザーに通知
         try:
             path_parts = file_path.split('/')
@@ -96,7 +119,7 @@ def process_video(data, context):
         }
     
     finally:
-        # 5. 一時ファイルを削除
+        # 8. 一時ファイルを削除
         if os.path.exists(temp_path):
             os.remove(temp_path)
             print(f"一時ファイル削除: {temp_path}")
@@ -146,7 +169,7 @@ def call_dify_api(scores, user_id):
         if response.status_code == 200:
             result = response.json()
             # Difyのレスポンス形式に応じて調整
-            message = result.get('answer', result.get('text', ''))
+            message = result.get('answer', result.get('text', result.get('message', '')))
             print(f"Dify API成功: {message[:100]}...")
             return message
         else:
@@ -155,6 +178,8 @@ def call_dify_api(scores, user_id):
             
     except Exception as e:
         print(f"Dify API呼び出しエラー: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -197,6 +222,36 @@ def send_line_message(user_id, message):
             
     except Exception as e:
         print(f"LINE API呼び出しエラー: {str(e)}")
+        import traceback
+        traceback.print_exc()
+
+
+# Firebase Storage トリガー関数（CloudEvent形式）
+if functions_framework:
+    @functions_framework.cloud_event
+    def process_video_trigger(cloud_event):
+        """
+        Firebase StorageのCloudEventトリガー
+        
+        Storageにファイルが作成されると自動で呼ばれます
+        """
+        # CloudEventからデータを抽出
+        event_data = cloud_event.data.get('data', {})
+        
+        # Base64デコードが必要な場合
+        if isinstance(event_data, str):
+            try:
+                decoded_data = base64.b64decode(event_data).decode('utf-8')
+                event_data = json.loads(decoded_data)
+            except:
+                # JSON文字列の場合
+                try:
+                    event_data = json.loads(event_data)
+                except:
+                    event_data = {}
+        
+        # process_video関数を呼び出し
+        return process_video(event_data, None)
 
 
 # テスト用（ローカル実行時）
@@ -209,4 +264,3 @@ if __name__ == '__main__':
     
     result = process_video(test_data, None)
     print(json.dumps(result, indent=2, ensure_ascii=False))
-
