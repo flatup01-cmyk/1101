@@ -1,0 +1,79 @@
+# OS生成ファイル
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# エディタ・IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cursor/
+
+# 一時ファイル・ログ
+*.log
+*.tmp
+*.temp
+*.bak
+*.backup
+*~
+
+# Node.js（プロジェクトで使用する場合）
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
+# Python（プロジェクトで使用する場合）
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# 環境変数ファイル
+.env
+.env.local
+.env.*.local
+
+# ビルド出力
+dist/
+build/
+*.egg-info/
+
+# キャッシュ
+.cache/
+*.cache
+
+# 秘密鍵・認証情報
+*.pem
+*.key
+*.json
+!package.json
+!tsconfig.json
+credentials.json
+secrets.json
+
+# メディアファイル（必要に応じて調整）
+# *.mp4
+# *.mov
+# *.avi
+*.jpg
+*.jpeg
+*.png
+*.gif
+
+# その他
+*.md.bak
+
