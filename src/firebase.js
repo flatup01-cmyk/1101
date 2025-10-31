@@ -1,11 +1,24 @@
 // Firebase初期化とStorage操作
 import { initializeApp } from 'firebase/app'
 import { getStorage, ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage'
-import { FIREBASE_CONFIG } from './config.js'
+import { getAuth, signInAnonymously } from 'firebase/auth'
+import { FIREBASE_CONFIG, LIFF_CONFIG } from './config.js'
 
 // Firebase初期化
 const app = initializeApp(FIREBASE_CONFIG)
 export const storage = getStorage(app)
+export const auth = getAuth(app)
+
+// 開発モードでFirebase匿名認証を実行
+if (LIFF_CONFIG.isDevMode) {
+  signInAnonymously(auth)
+    .then(() => {
+      console.log('✅ 開発モード: Firebase匿名認証成功')
+    })
+    .catch((error) => {
+      console.error('❌ 開発モード: Firebase匿名認証失敗:', error)
+    })
+}
 
 /**
  * 動画ファイルをFirebase Storageにアップロード

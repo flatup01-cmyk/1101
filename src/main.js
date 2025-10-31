@@ -385,8 +385,34 @@ function createVideoUploadUI(userId) {
       `
     
     try {
+      // 開発モードの場合、Firebase認証を待つ
+      let actualUserId = userId
+      if (LIFF_CONFIG.isDevMode) {
+        const { auth } = await import('./firebase.js')
+        if (!auth.currentUser) {
+          // 匿名認証が完了するまで待つ
+          await new Promise((resolve) => {
+            const unsubscribe = auth.onAuthStateChanged((user) => {
+              if (user) {
+                unsubscribe()
+                actualUserId = user.uid
+                resolve()
+              }
+            })
+            // タイムアウト（5秒）
+            setTimeout(() => {
+              unsubscribe()
+              resolve()
+            }, 5000)
+          })
+        } else {
+          actualUserId = auth.currentUser.uid
+        }
+        console.log('🔧 開発モード: 実際のユーザーID:', actualUserId)
+      }
+      
       // 進捗監視
-      window.addEventListener('uploadProgress', (e) => {
+      const progressHandler = (e) => {
         const progress = e.detail.progress
         progressDiv.innerHTML = `
           <div style="background: rgba(0, 0, 0, 0.4); border-radius: 8px; padding: 15px; border: 2px solid rgba(100, 200, 255, 0.5); font-family: 'Courier New', monospace;">
@@ -398,10 +424,14 @@ function createVideoUploadUI(userId) {
             </div>
           </div>
         `
-      })
+      }
+      window.addEventListener('uploadProgress', progressHandler)
       
       // Firebase Storageにアップロード
-      const downloadURL = await uploadVideoToStorage(selectedFile, userId)
+      const downloadURL = await uploadVideoToStorage(selectedFile, actualUserId)
+      
+      // 進捗イベントリスナーを削除
+      window.removeEventListener('uploadProgress', progressHandler)
       
       // AIKA18号の成功メッセージ（ツンデレ口調）+ スカウター表示
       progressDiv.innerHTML = `
@@ -439,6 +469,16 @@ function createVideoUploadUI(userId) {
       
     } catch (error) {
       console.error('アップロードエラー:', error)
+      
+      // エラーの詳細情報
+      let errorMessage = error.message || '何か問題が発生したわ'
+      
+      // 開発モードで認証エラーの場合、より詳細なメッセージ
+      if (LIFF_CONFIG.isDevMode && error.message && error.message.includes('auth')) {
+        errorMessage = 'Firebase認証エラー: 開発モードで認証に失敗しました。コンソールを確認してください。'
+        console.error('🔧 開発モード認証エラー詳細:', error)
+      }
+      
       progressDiv.innerHTML = `
         <div style="background: rgba(0, 0, 0, 0.4); border-radius: 8px; padding: 15px; margin-top: 1rem; border: 2px solid rgba(255, 100, 100, 0.5); font-family: 'Courier New', monospace;">
           <div style="font-size: 0.75rem; color: #ff6464; margin-bottom: 8px; text-align: left;">
@@ -447,11 +487,12 @@ function createVideoUploadUI(userId) {
           <div style="font-size: 0.85rem; color: #fff; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255, 100, 100, 0.3);">
             …チッ、エラーよ。<br>
             <span style="font-size: 0.8rem; color: #ff9800; margin-top: 5px; display: block;">
-              ${escapeHtml(error.message || '何か問題が発生したわ')}
+              ${escapeHtml(errorMessage)}
             </span>
             <span style="font-size: 0.75rem; color: #64c8ff; margin-top: 8px; display: block;">
               もう一度やり直しなさい。
             </span>
+            ${LIFF_CONFIG.isDevMode ? '<span style="font-size: 0.7rem; color: #ff9800; margin-top: 8px; display: block;">💡 開発モード: F12でコンソールを開いてエラー詳細を確認してください。</span>' : ''}
           </div>
         </div>
       `
