@@ -45,7 +45,7 @@ LINE_CHANNEL_ACCESS_TOKEN = access_secret_with_api("LINE_CHANNEL_ACCESS_TOKEN", 
 # ... (Add other secrets here if needed)
 
 # (The rest of the file remains the same)
-, storage, firestore
+
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from analyze import analyze_kickboxing_form
