@@ -452,39 +452,174 @@ function createVideoUploadUI(userId) {
     }).catch((error) => {
       // エラー時
       console.error('動画読み込みエラー:', error)
-      alert(`動画ファイルの読み込みに失敗しました: ${error.message}\n\n別の動画を選択してください。`)
+      alert(`…この動画、読めないわ。別の動画を選びなさい。`)
       videoInput.value = ''
       previewDiv.innerHTML = ''
       previewDiv.style.display = 'none'
-      uploadBtn.style.display = 'none'
+      selectBtn.disabled = false
+      selectBtn.classList.remove('loading-state')
       selectedFile = null
     })
+  })
+}
+
+// アップロード処理関数（ツンデレ風）
+async function handleUpload(selectedFile, userId, progressDiv, previewDiv) {
+  if (!selectedFile) return
+  
+  const uploadBtn = document.getElementById('uploadBtn')
+  if (uploadBtn) {
+    uploadBtn.disabled = true
+    uploadBtn.innerHTML = '<div class="btn-text">…待ってなさい</div>'
+  }
+  
+  progressDiv.style.display = 'block'
+  progressDiv.innerHTML = `
+    <div style="padding: 20px; background: rgba(0, 0, 0, 0.4); border-radius: 12px; border: 2px solid rgba(255, 107, 157, 0.5); font-family: 'Courier New', monospace; text-align: center;">
+      <div style="font-size: 1.5rem; margin-bottom: 10px;">💭</div>
+      <div style="font-size: 1rem; color: #ff6b9d; margin-bottom: 10px;">
+        ちょっと！今、必死に見てやってんだから<br>静かに待ちなさい！
+      </div>
+      <div style="font-size: 0.85rem; color: #fff; opacity: 0.8; margin-top: 10px;">
+        解析中よ…
+      </div>
+    </div>
+  `
+  
+  try {
+    // 認証状態を確認
+    let actualUserId = userId
     
-    // ステップガイドを更新
-    const stepsGuide = document.getElementById('stepsGuide')
-    if (stepsGuide) {
-      stepsGuide.innerHTML = `
-        <div style="font-size: 0.9rem; font-weight: bold; color: #64ff64; margin-bottom: 10px;">
-          ✅ ステップ①完了：動画を選びました
-        </div>
-        <div style="font-size: 0.85rem; line-height: 1.8; color: #fff;">
-          <div style="margin-bottom: 8px;">
-            <strong style="color: #64c8ff;">次のステップ：</strong>
+    // 開発モードの場合
+    if (LIFF_CONFIG.isDevMode) {
+      const { auth } = await import('./firebase.js')
+      if (!auth.currentUser) {
+        await new Promise((resolve) => {
+          let resolved = false
+          const unsubscribe = auth.onAuthStateChanged((user) => {
+            if (user && !resolved) {
+              resolved = true
+              unsubscribe()
+              actualUserId = user.uid
+              resolve()
+            }
+          })
+          setTimeout(() => {
+            if (!resolved) {
+              resolved = true
+              unsubscribe()
+              if (auth.currentUser) {
+                actualUserId = auth.currentUser.uid
+              }
+              resolve()
+            }
+          }, 15000)
+        })
+      } else {
+        actualUserId = auth.currentUser.uid
+      }
+    } else {
+      // 本番モード（LINE認証）
+      if (!userId || userId === 'test_user') {
+        if (typeof liff === 'undefined' || !liff.isLoggedIn()) {
+          throw new Error('LINE認証が必要です。LINEアプリ内で開いてください。')
+        }
+        
+        let profileRetrieved = false
+        for (let retry = 0; retry < 3; retry++) {
+          try {
+            const profile = await liff.getProfile()
+            if (profile && profile.userId) {
+              actualUserId = profile.userId
+              profileRetrieved = true
+              break
+            }
+          } catch (error) {
+            if (retry < 2) {
+              await new Promise(resolve => setTimeout(resolve, 1000))
+            }
+          }
+        }
+        
+        if (!profileRetrieved) {
+          throw new Error('認証タイムアウト: LINEアプリ内でページを再読み込みしてください。')
+        }
+      } else {
+        actualUserId = userId
+      }
+    }
+    
+    // 進捗監視
+    const progressHandler = (e) => {
+      const progress = e.detail.progress || 0
+      progressDiv.innerHTML = `
+        <div style="padding: 20px; background: rgba(0, 0, 0, 0.4); border-radius: 12px; border: 2px solid rgba(255, 107, 157, 0.5); font-family: 'Courier New', monospace; text-align: center;">
+          <div style="font-size: 1.2rem; color: #ff6b9d; margin-bottom: 10px;">
+            …アップロード中よ（${Math.round(progress)}%）
           </div>
-          <div style="margin-bottom: 8px; padding-left: 15px;">
-            👇 一番下の「🚀 解析開始」ボタンを押してください
-          </div>
-          <div style="font-size: 0.75rem; color: #ff9800; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.2);">
-            💡 解析開始を押すと、自動でアップロード→解析が始まって、結果がLINEで届くわよ。<br>
-            <span style="color: #ff6464; font-weight: bold;">⚠️ 動画は10秒以内、100MB以内に収めてなさいよ。</span>
+          <div style="background: rgba(255, 255, 255, 0.2); border-radius: 4px; height: 8px; overflow: hidden; margin-top: 10px;">
+            <div style="background: linear-gradient(90deg, #ff6b9d 0%, #c44569 100%); height: 100%; width: ${progress}%; transition: width 0.3s;"></div>
           </div>
         </div>
       `
     }
-  })
-  
-  // アップロードボタン
-  uploadBtn.addEventListener('click', async () => {
+    window.addEventListener('uploadProgress', progressHandler)
+    progressHandler({ detail: { progress: 0 } })
+    
+    // Firebase Storageにアップロード
+    const downloadURL = await uploadVideoToStorage(selectedFile, actualUserId)
+    
+    window.removeEventListener('uploadProgress', progressHandler)
+    
+    // 成功メッセージ（ツンデレ風）
+    progressDiv.innerHTML = `
+      <div style="padding: 20px; background: rgba(100, 255, 100, 0.15); border-radius: 12px; border: 2px solid rgba(100, 255, 100, 0.4); font-family: 'Courier New', monospace; text-align: center;">
+        <div style="font-size: 1.5rem; margin-bottom: 10px;">✨</div>
+        <div style="font-size: 1rem; color: #64ff64; margin-bottom: 10px;">
+          …まあ、動画は受け取ったわよ
+        </div>
+        <div style="font-size: 0.85rem; color: #fff; opacity: 0.9; margin-top: 10px;">
+          AIKA18号が解析中よ。<br>
+          結果は数分後にLINEで届くわ。<br>
+          …フン、せいぜい期待してなさいな。
+        </div>
+      </div>
+    `
+    
+    if (uploadBtn) uploadBtn.style.display = 'none'
+    
+    // リセット準備
+    setTimeout(() => {
+      document.getElementById('videoInput').value = ''
+      selectedFile = null
+      previewDiv.style.display = 'none'
+      progressDiv.innerHTML = ''
+      location.reload()
+    }, 5000)
+    
+  } catch (error) {
+    console.error('アップロードエラー:', error)
+    
+    progressDiv.innerHTML = `
+      <div style="padding: 20px; background: rgba(255, 100, 100, 0.15); border-radius: 12px; border: 2px solid rgba(255, 100, 100, 0.4); font-family: 'Courier New', monospace; text-align: center;">
+        <div style="font-size: 1.5rem; margin-bottom: 10px;">💢</div>
+        <div style="font-size: 1rem; color: #ff6464; margin-bottom: 10px;">
+          …チッ、エラーよ。
+        </div>
+        <div style="font-size: 0.85rem; color: #fff; opacity: 0.9; margin-top: 10px;">
+          ${escapeHtml(error.message || '何か問題が発生したわ')}<br>
+          <span style="font-size: 0.75rem; color: #ff9800; display: block; margin-top: 8px;">
+            もう一度やり直しなさい。
+          </span>
+        </div>
+      </div>
+    `
+    
+    if (uploadBtn) {
+      uploadBtn.disabled = false
+      uploadBtn.innerHTML = '<div class="btn-text">…解析してもいいわよ</div>'
+    }
+  }
     if (!selectedFile) return
     
     // UI更新
