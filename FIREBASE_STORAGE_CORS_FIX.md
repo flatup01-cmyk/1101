@@ -123,3 +123,4 @@ gsutil cors get gs://aikaapp-584fa.appspot.com
 **状態:** ⚠️ CORS設定が必要
 
 
+

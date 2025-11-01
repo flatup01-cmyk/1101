@@ -1,0 +1,44 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // video_jobsコレクションのルール
+    match /video_jobs/{jobId} {
+      // 作成は認証済みユーザーのみ
+      allow create: if request.auth != null;
+
+      // 読み取りはジョブの所有者のみ
+      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+
+      // 更新はジョブの所有者のみ、かつ特定のフィールドのみ変更可能
+      allow update: if request.auth != null
+                      && request.auth.uid == resource.data.userId
+                      && request.resource.data.keys().hasOnly(['status', 'analysis_result', 'aika_message', 'notification_sent', 'completed_at', 'updated_at', 'retries', 'error_message']);
+
+      // 削除は拒否（ジョブは削除しない）
+      allow delete: if false;
+    }
+
+    // video_processingコレクションのルール（冪等性確保用）
+    match /video_processing/{docId} {
+      // 作成は認証済みユーザーのみ
+      allow create: if request.auth != null;
+
+      // 読み取りはジョブの所有者のみ
+      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+
+      // 更新はジョブの所有者のみ、かつ特定のフィールドのみ変更可能
+      allow update: if request.auth != null
+                      && request.auth.uid == resource.data.userId
+                      && request.resource.data.keys().hasOnly(['status', 'file_path', 'user_id', 'started_at', 'updated_at', 'error_message']);
+
+      // 削除は拒否
+      allow delete: if false;
+    }
+
+    // その他のコレクションはデフォルトで拒否
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

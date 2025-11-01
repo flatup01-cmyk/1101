@@ -1,3 +1,21 @@
+/*
+ * AIKA-18 UI Revolution
+ * Concept: "Use it without thinking. And get hooked."
+ * V.2.0 - Perfected by your partner.
+ */
+
+:root {
+  --primary-brand-color: #ff6b9d; /* Tsundere Pink */
+  --secondary-brand-color: #c44569; /* Deeper Pink */
+  --accent-color: #64c8ff; /* Electric Blue */
+  --background-gradient-start: #2c1e38; /* Deep Purple */
+  --background-gradient-end: #4a2a52; /* Lighter Purple */
+  --text-color: #ffffff;
+  --text-shadow-color: rgba(0, 0, 0, 0.5);
+  --font-main: 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
+  --font-mono: 'Courier New', monospace;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -5,321 +23,194 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  font-family: var(--font-main);
+  background: linear-gradient(135deg, var(--background-gradient-start) 0%, var(--background-gradient-end) 100%);
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: var(--text-color);
+  overflow: hidden;
 }
 
 .container {
+  width: 100%;
+  max-width: 600px;
   text-align: center;
   padding: 2rem;
-  max-width: 600px;
 }
 
-h1 {
-  font-size: 3rem;
-  margin-bottom: 1rem;
-  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
-}
-
-.subtitle {
-  font-size: 1.2rem;
-  margin-bottom: 2rem;
-  opacity: 0.9;
-}
-
-.aika-image-wrapper {
-  margin: 2rem 0;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
-
-.aika-image {
-  max-width: 100%;
-  height: auto;
-  border-radius: 10px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-  max-height: 400px;
-  object-fit: contain;
-}
-
-@media (max-width: 768px) {
-  .aika-image {
-    max-height: 300px;
-  }
-  
-  h1 {
-    font-size: 2rem;
-  }
-  
-  .subtitle {
-    font-size: 1rem;
-  }
-}
-
-.status {
-  background: rgba(255, 255, 255, 0.2);
-  backdrop-filter: blur(10px);
-  border-radius: 10px;
-  padding: 1.5rem;
-  margin-top: 2rem;
-}
-
-/* スカウター風アニメーション */
-@keyframes scouter-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
-}
-
-.scouter-display {
-  animation: scouter-pulse 2s ease-in-out infinite;
-}
-
-/* ボタンのホバーエフェクト強化 */
-.upload-button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(100, 200, 255, 0.4) !important;
-  transition: all 0.3s ease;
-}
-
-/* AIKA18号のツンデレアニメーション */
-
-/* 1. 良いスコア時の照れアニメーション（頬を赤らめる） */
-@keyframes aika-blush {
-  0%, 100% { 
-    filter: brightness(1) saturate(1);
-    transform: scale(1);
-  }
-  50% { 
-    filter: brightness(1.1) saturate(1.2);
-    transform: scale(1.02);
-  }
-}
-
-.aika-blush {
-  animation: aika-blush 1.5s ease-in-out infinite;
-  position: relative;
-}
-
-.aika-blush::after {
-  content: '';
-  position: absolute;
-  top: 20%;
-  left: 15%;
-  width: 30%;
-  height: 20%;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(255, 150, 150, 0.3) 0%, transparent 70%);
-  animation: blush-pulse 1.5s ease-in-out infinite;
-}
-
-.aika-blush::before {
-  content: '';
-  position: absolute;
-  top: 20%;
-  right: 15%;
-  width: 30%;
-  height: 20%;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(255, 150, 150, 0.3) 0%, transparent 70%);
-  animation: blush-pulse 1.5s ease-in-out infinite 0.3s;
-}
-
-@keyframes blush-pulse {
-  0%, 100% { opacity: 0.3; transform: scale(1); }
-  50% { opacity: 0.6; transform: scale(1.2); }
-}
-
-/* 2. 悪いスコア時の怒りアニメーション */
-@keyframes aika-angry {
-  0%, 100% { 
-    transform: translateX(0) rotate(0deg);
-    filter: brightness(1) hue-rotate(0deg);
-  }
-  25% { 
-    transform: translateX(-3px) rotate(-2deg);
-    filter: brightness(1.1) hue-rotate(-5deg);
-  }
-  75% { 
-    transform: translateX(3px) rotate(2deg);
-    filter: brightness(1.1) hue-rotate(5deg);
-  }
-}
-
-.aika-angry {
-  animation: aika-angry 0.3s ease-in-out infinite;
-  position: relative;
-}
-
-.aika-angry::after {
-  content: '💢';
-  position: absolute;
-  top: -10px;
-  right: -10px;
-  font-size: 1.5rem;
-  animation: angry-symbol 0.5s ease-in-out infinite;
-}
-
-@keyframes angry-symbol {
-  0%, 100% { transform: scale(1) rotate(0deg); opacity: 0.8; }
-  50% { transform: scale(1.3) rotate(15deg); opacity: 1; }
-}
-
-/* 3. 照れアニメーション（かわいいと言われた時） */
-@keyframes aika-shy {
-  0%, 100% { 
-    transform: translateY(0) scale(1);
-    filter: brightness(1);
-  }
-  50% { 
-    transform: translateY(-5px) scale(1.05);
-    filter: brightness(1.15) saturate(1.1);
-  }
-}
-
-.aika-shy {
-  animation: aika-shy 1s ease-in-out infinite;
-  position: relative;
-}
-
-.aika-shy::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: radial-gradient(circle at 30% 30%, rgba(255, 200, 200, 0.4) 0%, transparent 50%);
-  border-radius: 50%;
-  animation: shy-glow 1.5s ease-in-out infinite;
-}
-
-@keyframes shy-glow {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 0.7; }
-}
-
-/* メッセージ表示アニメーション */
-@keyframes message-appear {
-  0% {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.aika-message {
-  animation: message-appear 0.5s ease-out;
-}
-
-/* スコア表示のアニメーション */
-@keyframes score-count {
-  0% { opacity: 0; transform: scale(0.8); }
-  100% { opacity: 1; transform: scale(1); }
-}
-
-.score-display {
-  animation: score-count 0.8s ease-out;
-}
-
-.status h2 {
-  font-size: 1.5rem;
-  margin-bottom: 0.5rem;
-}
-
-.status p {
-  opacity: 0.8;
-  line-height: 1.6;
-}
-
-/* --- UI Revolution Styles --- */
-
-.action-container {
-  margin-top: 1.5rem;
-  padding: 1.5rem;
-  min-height: 150px; /* Ensure container has height */
+#app {
+  width: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 15px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(10px);
-  transition: all 0.3s ease;
+  transition: all 0.5s cubic-bezier(0.23, 1, 0.32, 1);
 }
 
-#main-action-btn {
-  font-family: 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
+/* --- The Main Attraction: Giant Upload Button --- */
+
+.upload-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2rem;
+  animation: fadeIn 1s ease-out;
+}
+
+.giant-upload-btn {
+  width: min(80vw, 320px);
+  height: min(80vw, 320px);
+  border-radius: 50%;
+  border: 4px solid var(--primary-brand-color);
+  background: radial-gradient(circle, var(--secondary-brand-color) 0%, var(--background-gradient-start) 70%);
+  color: var(--text-color);
+  font-size: clamp(1rem, 4vw, 1.2rem);
   font-weight: bold;
-  font-size: 1.2rem;
-  color: #fff;
-  background: linear-gradient(145deg, #ff47a8, #ff775c);
-  border: none;
-  border-radius: 50px; /* More rounded */
-  padding: 18px 35px;
   cursor: pointer;
-  transition: all 0.3s ease-in-out;
-  box-shadow: 0 5px 20px rgba(255, 100, 150, 0.4);
-  transform: scale(1);
-  animation: pulse-animation 2s infinite;
+  box-shadow:
+    0 10px 40px rgba(0, 0, 0, 0.5),
+    0 0 20px var(--primary-brand-color),
+    inset 0 0 15px rgba(0, 0, 0, 0.5);
+  position: relative;
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  text-shadow: 2px 2px 4px var(--text-shadow-color);
+  animation: subtle-pulse 3s ease-in-out infinite;
 }
 
-#main-action-btn:hover {
-  transform: scale(1.05) !important; /* Override other transforms */
-  box-shadow: 0 8px 30px rgba(255, 100, 150, 0.6);
+.giant-upload-btn .btn-icon {
+  font-size: clamp(3rem, 12vw, 4rem);
+  filter: drop-shadow(0 4px 8px var(--text-shadow-color));
+  transition: transform 0.3s ease;
 }
 
-#main-action-btn:disabled {
-  background: linear-gradient(145deg, #555, #333);
+.giant-upload-btn .btn-text {
+  font-family: var(--font-mono);
+  line-height: 1.4;
+  padding: 0 1rem;
+}
+
+.giant-upload-btn:hover {
+  transform: scale(1.08);
+  box-shadow:
+    0 15px 50px rgba(0, 0, 0, 0.7),
+    0 0 30px var(--primary-brand-color),
+    inset 0 0 20px rgba(0, 0, 0, 0.5);
+  border-color: var(--accent-color);
+}
+
+.giant-upload-btn:hover .btn-icon {
+  transform: scale(1.1) rotate(-10deg);
+}
+
+.giant-upload-btn:active {
+  transform: scale(0.95);
+  box-shadow:
+    0 5px 20px rgba(0, 0, 0, 0.5),
+    0 0 15px var(--primary-brand-color),
+    inset 0 0 25px rgba(0, 0, 0, 0.8);
+}
+
+.giant-upload-btn:disabled {
   cursor: not-allowed;
   animation: none;
-  box-shadow: none;
+  background: #333;
+  border-color: #555;
+  box-shadow: inset 0 0 25px rgba(0, 0, 0, 0.8);
 }
 
-@keyframes pulse-animation {
-  0% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.03);
-  }
-  100% {
-    transform: scale(1);
-  }
+/* --- Animations --- */
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-.aika-dialogue {
+@keyframes subtle-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.02); }
+}
+
+/* --- Status & Feedback Messages --- */
+
+.feedback-container {
+  width: 100%;
+  max-width: 400px;
+  padding: 20px;
+  margin-top: 2rem;
+  border-radius: 12px;
+  font-family: var(--font-mono);
+  text-align: center;
+  animation: fadeIn 0.5s ease-out;
+  border: 2px solid;
+  box-shadow: 0 5px 20px rgba(0,0,0,0.4);
+}
+
+.feedback-container.processing {
+  background: rgba(0, 0, 0, 0.4);
+  border-color: var(--accent-color);
+}
+
+.feedback-container.success {
+  background: rgba(100, 255, 100, 0.15);
+  border-color: #64ff64;
+}
+
+.feedback-container.error {
+  background: rgba(255, 100, 100, 0.15);
+  border-color: #ff6464;
+}
+
+.feedback-container .icon {
+  font-size: 2rem;
+  margin-bottom: 10px;
+  animation: icon-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.feedback-container .message {
   font-size: 1rem;
-  font-weight: bold;
-  color: #ffddaa;
-  text-shadow: 0 0 8px rgba(0,0,0,0.5);
-  padding: 10px;
-  animation: message-appear 0.5s ease-out;
+  color: var(--text-color);
+  line-height: 1.5;
 }
 
-#progress-bar-container {
-    width: 80%;
-    height: 10px;
-    background-color: rgba(0, 0, 0, 0.3);
-    border-radius: 5px;
-    margin-top: 15px;
-    overflow: hidden;
+.feedback-container .sub-message {
+  font-size: 0.85rem;
+  color: var(--text-color);
+  opacity: 0.8;
+  margin-top: 10px;
 }
 
-#progress-bar {
-    width: 0%;
-    height: 100%;
-    background: linear-gradient(90deg, #64c8ff 0%, #64ff64 100%);
-    border-radius: 5px;
-    transition: width 0.3s ease-in-out;
+@keyframes icon-pop {
+  0% { transform: scale(0.5); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
 }
 
+/* --- Progress Bar --- */
+.progress-bar-container {
+  width: 80%;
+  height: 8px;
+  background-color: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  margin-top: 15px;
+  overflow: hidden;
+}
+
+.progress-bar {
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary-brand-color) 0%, var(--accent-color) 100%);
+  border-radius: 4px;
+  transition: width 0.3s ease-in-out;
+}
+
+/* --- Hidden file input --- */
+#video-input {
+  display: none;
+}

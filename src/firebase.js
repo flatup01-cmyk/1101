@@ -12,6 +12,15 @@ const firestore = getFirestore(app);
 
 console.log('✅ Firebase Core Services Initialized');
 
+/**
+ * Initialize Firebase (for compatibility)
+ */
+export async function initFirebase() {
+    // Firebase is already initialized above
+    // This function exists for compatibility with main.js
+    return Promise.resolve();
+}
+
 // --- Anonymous Auth for Dev Mode ---
 if (import.meta.env.DEV) {
     if (!auth.currentUser) {
