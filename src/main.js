@@ -4,7 +4,6 @@ import liff from '@line/liff'
 import { LIFF_CONFIG } from './config.js'
 import { uploadVideoToStorage } from './firebase.js'
 import { displayAikaReaction, applyAikaImageAnimation, createScoreDisplayArea, getAikaReaction } from './aika-animations.js'
-import { testAikaReactions } from './test-score-display.js'
 
 // XSS対策: HTMLエスケープ関数（グローバル）
 function escapeHtml(text) {
@@ -280,9 +279,6 @@ function initApp(profile) {
       </ul>
     `
     document.querySelector('.status')?.appendChild(configStatus)
-    
-    // 開発環境でのみテスト機能を有効化
-    setTimeout(() => testAikaReactions(), 1000)
   }
   
   // 動画アップロードUIを追加
