@@ -62,10 +62,10 @@ async function initializeLIFF() {
       liffId: LIFF_CONFIG.liffId
     })
 
-    // LIFF初期化（タイムアウト付き）
+    // LIFF初期化（タイムアウト延長：20秒）
     const initPromise = liff.init({ liffId: LIFF_CONFIG.liffId })
     const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('LIFF初期化がタイムアウトしました')), 10000)
+      setTimeout(() => reject(new Error('LIFF初期化がタイムアウトしました（20秒）')), 20000)
     )
     
     await Promise.race([initPromise, timeoutPromise])
@@ -275,7 +275,7 @@ function initApp(profile) {
   analyzeAndDisplayLandmarks()
 }
 
-// 動画アップロードUI作成
+// 動画アップロードUI作成（わかりやすい版）
 function createVideoUploadUI(userId) {
   const statusDiv = document.querySelector('.status')
   if (!statusDiv) return
@@ -285,16 +285,36 @@ function createVideoUploadUI(userId) {
   uploadSection.className = 'upload-section'
   uploadSection.style.cssText = 'margin-top: 2rem; padding: 1.5rem; background: rgba(255,255,255,0.15); border-radius: 10px;'
   uploadSection.innerHTML = `
-    <div style="margin-bottom: 1rem; padding: 12px; background: rgba(0, 0, 0, 0.3); border-radius: 8px; border: 1px solid rgba(100, 200, 255, 0.4); font-family: 'Courier New', monospace;">
+    <div style="margin-bottom: 1.5rem; padding: 12px; background: rgba(0, 0, 0, 0.3); border-radius: 8px; border: 1px solid rgba(100, 200, 255, 0.4); font-family: 'Courier New', monospace;">
       <div style="font-size: 0.75rem; color: #64c8ff; margin-bottom: 5px; text-align: left;">
-        ▸ VIDEO UPLOAD MODULE
+        ▸ VIDEO ANALYSIS MODULE
       </div>
-      <h3 style="margin-bottom: 0.8rem; font-size: 1.2rem; color: #fff;">🎯 動画アップロード</h3>
+      <h3 style="margin-bottom: 0.5rem; font-size: 1.2rem; color: #fff;">📹 動画解析システム</h3>
+      <p style="font-size: 0.9rem; opacity: 0.9; line-height: 1.5; margin: 0;">
+        フン、動画を選んで「解析開始」を押せば、AIKA18号のバトルスコープが自動で戦闘力を採点してやるわよ。
+      </p>
     </div>
-    <p style="margin-bottom: 1rem; font-size: 0.95rem; opacity: 0.95; line-height: 1.6; padding: 10px; background: rgba(255, 255, 255, 0.1); border-radius: 6px;">
-      フン、動画をセットしろ。AIKA18号のバトルスコープが、アンタの戦闘力を採点してやるよ。…せいぜい頑張りな。<br>
-      <span style="font-size: 0.85rem; opacity: 0.8; color: #64c8ff;">(最大100MB)</span>
-    </p>
+    
+    <!-- ステップ表示エリア -->
+    <div id="stepsGuide" style="margin-bottom: 1.5rem; padding: 15px; background: rgba(0, 0, 0, 0.2); border-radius: 8px; border-left: 4px solid #64c8ff;">
+      <div style="font-size: 0.9rem; font-weight: bold; color: #64c8ff; margin-bottom: 10px;">📋 使い方（とっても簡単よ）</div>
+      <div style="font-size: 0.85rem; line-height: 1.8; color: #fff;">
+        <div style="margin-bottom: 8px;">
+          <strong style="color: #64ff64;">①</strong> 下の「📁 動画を選ぶ」ボタンを押す
+        </div>
+        <div style="margin-bottom: 8px;">
+          <strong style="color: #64ff64;">②</strong> スマホから動画を選ぶ（最大100MB）
+        </div>
+        <div style="margin-bottom: 8px;">
+          <strong style="color: #64ff64;">③</strong> 一番下の「🚀 解析開始」ボタンを押す
+        </div>
+        <div style="font-size: 0.75rem; color: #ff9800; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.2);">
+          💡 解析開始を押すと、自動でアップロードされて解析が始まるわよ。結果はLINEで届くから待ってなさい。
+        </div>
+      </div>
+    </div>
+    
+    <!-- ファイル選択ボタン（わかりやすい位置） -->
     <input 
       type="file" 
       id="videoInput" 
@@ -304,15 +324,23 @@ function createVideoUploadUI(userId) {
     <button 
       id="selectVideoBtn" 
       class="upload-button"
-      style="width: 100%; padding: 12px 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; border-radius: 8px; color: white; font-size: 1rem; cursor: pointer; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.2);"
+      style="width: 100%; padding: 14px 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; border-radius: 8px; color: white; font-size: 1.1rem; cursor: pointer; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.2); margin-bottom: 1rem;"
     >
-      🎯 動画をセット
+      📁 動画を選ぶ（最大100MB）
     </button>
-    <div id="videoPreview" style="display: none; margin-top: 1rem;"></div>
-    <div id="uploadProgress" style="display: none; margin-top: 1rem;"></div>
+    
+    <!-- プレビューエリア -->
+    <div id="videoPreview" style="display: none; margin-top: 1rem; margin-bottom: 1rem;"></div>
+    
+    <!-- 進捗表示エリア -->
+    <div id="uploadProgress" style="display: none; margin-top: 1rem; margin-bottom: 1rem;"></div>
+    
+    <!-- 解析開始ボタン（一番下に配置） -->
     <button 
       id="uploadBtn" 
-      style="display: none; width: 100%; margin-top: 1rem; padding: 12px 24px; background: rgba(255,255,255,0.2); border: 2px solid rgba(255,255,255,0.5); border-radius: 8px; color: white; font-size: 1rem; cursor: pointer; font-weight: bold;"
+      style="display: none; width: 100%; margin-top: 2rem; padding: 16px 24px; background: linear-gradient(135deg, #64ff64 0%, #64c8ff 100%); border: none; border-radius: 8px; color: #000; font-size: 1.2rem; cursor: pointer; font-weight: bold; box-shadow: 0 6px 20px rgba(100, 255, 255, 0.4); transition: transform 0.2s;"
+      onmouseover="this.style.transform='scale(1.02)'"
+      onmouseout="this.style.transform='scale(1)'"
     >
       🚀 解析開始
     </button>
@@ -358,11 +386,43 @@ function createVideoUploadUI(userId) {
     previewDiv.style.display = 'block'
     uploadBtn.style.display = 'block'
     
-    // ファイル情報表示
-    const fileInfo = document.createElement('p')
-    fileInfo.style.cssText = 'margin-top: 0.5rem; font-size: 0.85rem; opacity: 0.8;'
-    fileInfo.textContent = `ファイル名: ${file.name} | サイズ: ${(file.size / 1024 / 1024).toFixed(2)}MB`
+    // ファイル情報表示（わかりやすく）
+    const fileInfo = document.createElement('div')
+    fileInfo.style.cssText = 'margin-top: 0.8rem; padding: 10px; background: rgba(100, 255, 100, 0.15); border-radius: 6px; border: 1px solid rgba(100, 255, 100, 0.3);'
+    fileInfo.innerHTML = `
+      <div style="font-size: 0.9rem; color: #64ff64; margin-bottom: 5px;">
+        ✅ 動画が選ばれました！
+      </div>
+      <div style="font-size: 0.85rem; color: #fff; opacity: 0.9;">
+        ファイル名: ${escapeHtml(file.name)}<br>
+        サイズ: ${(file.size / 1024 / 1024).toFixed(2)}MB
+      </div>
+      <div style="font-size: 0.75rem; color: #ff9800; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.2);">
+        💡 下の「🚀 解析開始」ボタンを押してね！
+      </div>
+    `
     previewDiv.appendChild(fileInfo)
+    
+    // ステップガイドを更新
+    const stepsGuide = document.getElementById('stepsGuide')
+    if (stepsGuide) {
+      stepsGuide.innerHTML = `
+        <div style="font-size: 0.9rem; font-weight: bold; color: #64ff64; margin-bottom: 10px;">
+          ✅ ステップ①完了：動画を選びました
+        </div>
+        <div style="font-size: 0.85rem; line-height: 1.8; color: #fff;">
+          <div style="margin-bottom: 8px;">
+            <strong style="color: #64c8ff;">次のステップ：</strong>
+          </div>
+          <div style="margin-bottom: 8px; padding-left: 15px;">
+            👇 一番下の「🚀 解析開始」ボタンを押してください
+          </div>
+          <div style="font-size: 0.75rem; color: #ff9800; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.2);">
+            💡 解析開始を押すと、自動でアップロード→解析が始まって、結果がLINEで届くわよ。
+          </div>
+        </div>
+      `
+    }
   })
   
   // アップロードボタン
@@ -379,36 +439,108 @@ function createVideoUploadUI(userId) {
             ▸ INITIALIZING ANALYSIS...
           </div>
           <div style="font-size: 0.85rem; color: #fff; margin-top: 5px;">
-            …解析を開始するわよ。ちょっと待ちなさい。
+            …解析を開始するわよ。動画をアップロードして、AIKA18号のバトルスコープで解析するから、ちょっと待ちなさい。
           </div>
         </div>
       `
     
     try {
-      // 開発モードの場合、Firebase認証を待つ
+      // 認証状態を確認（開発モード・本番モード両方に対応）
       let actualUserId = userId
+      
+      // 開発モードの場合
       if (LIFF_CONFIG.isDevMode) {
         const { auth } = await import('./firebase.js')
         if (!auth.currentUser) {
-          // 匿名認証が完了するまで待つ
+          // 匿名認証が完了するまで待つ（タイムアウト延長：15秒）
           await new Promise((resolve) => {
+            let resolved = false
             const unsubscribe = auth.onAuthStateChanged((user) => {
-              if (user) {
+              if (user && !resolved) {
+                resolved = true
                 unsubscribe()
                 actualUserId = user.uid
+                console.log('✅ 開発モード: 匿名認証成功:', actualUserId)
                 resolve()
               }
             })
-            // タイムアウト（5秒）
+            // タイムアウト（15秒に延長）
             setTimeout(() => {
-              unsubscribe()
-              resolve()
-            }, 5000)
+              if (!resolved) {
+                resolved = true
+                unsubscribe()
+                console.warn('⚠️ 開発モード: 認証タイムアウト（15秒）')
+                // タイムアウト後も続行を試みる
+                if (auth.currentUser) {
+                  actualUserId = auth.currentUser.uid
+                }
+                resolve()
+              }
+            }, 15000)
           })
         } else {
           actualUserId = auth.currentUser.uid
         }
         console.log('🔧 開発モード: 実際のユーザーID:', actualUserId)
+      } else {
+        // 本番モード（LINE認証）の場合
+        // LIFF認証が完了していることを確認（タイムアウト延長：20秒）
+        if (!userId || userId === 'test_user') {
+          // 認証が完了するまで待つ
+          await new Promise((resolve) => {
+            let resolved = false
+            const checkAuth = () => {
+              // LIFFプロファイルを再取得
+              if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
+                liff.getProfile()
+                  .then((profile) => {
+                    if (!resolved && profile.userId) {
+                      resolved = true
+                      actualUserId = profile.userId
+                      console.log('✅ LINE認証成功:', actualUserId)
+                      resolve()
+                    }
+                  })
+                  .catch((error) => {
+                    console.warn('⚠️ LIFFプロファイル取得失敗:', error)
+                    if (!resolved) {
+                      resolved = true
+                      resolve()
+                    }
+                  })
+              } else {
+                if (!resolved) {
+                  resolved = true
+                  console.warn('⚠️ LINE認証が完了していません')
+                  resolve()
+                }
+              }
+            }
+            
+            // 即座にチェック
+            checkAuth()
+            
+            // タイムアウト（20秒に延長）
+            setTimeout(() => {
+              if (!resolved) {
+                resolved = true
+                console.warn('⚠️ LINE認証タイムアウト（20秒）')
+                resolve()
+              }
+            }, 20000)
+            
+            // 1秒ごとに再試行（最大5回）
+            let retryCount = 0
+            const retryInterval = setInterval(() => {
+              if (!resolved && retryCount < 5) {
+                retryCount++
+                checkAuth()
+              } else {
+                clearInterval(retryInterval)
+              }
+            }, 1000)
+          })
+        }
       }
       
       // 進捗監視（アップロード開始前に設定）
