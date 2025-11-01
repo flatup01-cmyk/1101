@@ -5,47 +5,79 @@ import traceback
 
 import functions_framework
 import requests
-from google.cloud import secretmanager
+import os
+import json
+import tempfile
+import traceback
+
+import functions_framework
+import requests
+from google.cloud import storage, firestore
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+# --- Custom Secret Manager Accessor ---
+import google.auth
+import google.auth.transport.requests
+
+def access_secret_with_api(secret_id, project_id, version_id="latest"):
+    """Access a secret directly via the REST API."""
+    try:
+        creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        auth_req = google.auth.transport.requests.Request()
+        creds.refresh(auth_req)
+        
+        url = f"https://secretmanager.googleapis.com/v1/projects/{project_id}/secrets/{secret_id}/versions/{version_id}:access"
+        headers = {"Authorization": f"Bearer {creds.token}"}
+        
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        
+        payload = response.json()['payload']['data']
+        return base64.b64decode(payload).decode('UTF-8')
+    except Exception as e:
+        print(f"❌ FATAL: Failed to fetch secret '{secret_id}' via REST API: {e}")
+        # Fallback to environment variables as a last resort
+        return os.environ.get(secret_id, '')
+
+# --- Load Secrets ---
+PROJECT_ID = os.environ.get('GCP_PROJECT')
+LINE_CHANNEL_ACCESS_TOKEN = access_secret_with_api("LINE_CHANNEL_ACCESS_TOKEN", PROJECT_ID)
+# ... (Add other secrets here if needed)
+
+# (The rest of the file remains the same)
+, storage, firestore
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from analyze import analyze_kickboxing_form
 
 # --- Client Initialization ---
-try:
-    storage_client = storage.Client()
-    db = firestore.Client()
-    secret_client = secretmanager.SecretManagerServiceClient()
-except Exception as e:
-    print(f"❌ FATAL: Failed to initialize Google Cloud clients: {e}")
-    db, secret_client = None, None
+storage_client = storage.Client()
+db = firestore.Client()
+secret_client = secretmanager.SecretManagerServiceClient()
 
 # --- Secret Loading Function ---
 def access_secret_version(secret_id, project_id, version_id="latest"):
     """Access the payload for the given secret version."""
-    if not secret_client:
-        raise ConnectionError("Secret Manager client not initialized.")
     name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
     response = secret_client.access_secret_version(name=name)
     return response.payload.data.decode('UTF-8')
 
 # --- Load Secrets at Runtime ---
-PROJECT_ID = os.environ.get('GCP_PROJECT')
-DIFY_API_ENDPOINT = ""
-DIFY_API_KEY = ""
-LINE_CHANNEL_ACCESS_TOKEN = ""
+PROJECT_ID = os.environ.get('GCP_PROJECT', 'aikaapp-584fa')
 
+# LINEアクセストークンはSecret Managerから読み込み（最優先）
 try:
-    if PROJECT_ID:
-        DIFY_API_ENDPOINT = access_secret_version("DIFY_API_ENDPOINT", PROJECT_ID)
-        DIFY_API_KEY = access_secret_version("DIFY_API_KEY", PROJECT_ID)
-        LINE_CHANNEL_ACCESS_TOKEN = access_secret_version("LINE_CHANNEL_ACCESS_TOKEN", PROJECT_ID)
-        print("✅ Successfully loaded secrets from Secret Manager.")
+    LINE_CHANNEL_ACCESS_TOKEN = access_secret_version("line-channel-access-token", PROJECT_ID)
+    print("✅ Secret ManagerからLINEアクセストークンを読み込みました")
 except Exception as e:
-    print(f"❌ WARNING: Failed to load secrets from Secret Manager: {e}. Falling back to env vars.")
-    # Fallback to environment variables if Secret Manager fails
-    DIFY_API_ENDPOINT = os.environ.get('DIFY_API_ENDPOINT', '')
-    DIFY_API_KEY = os.environ.get('DIFY_API_KEY', '')
+    print(f"⚠️ Secret Managerからの読み込み失敗。環境変数にフォールバック: {str(e)}")
     LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN', '')
+    if not LINE_CHANNEL_ACCESS_TOKEN:
+        print("❌ CRITICAL: LINE_CHANNEL_ACCESS_TOKENが設定されていません！")
+
+# Dify API設定（環境変数から、将来的にSecret Managerへ移行可能）
+DIFY_API_ENDPOINT = os.environ.get('DIFY_API_ENDPOINT', '')
+DIFY_API_KEY = os.environ.get('DIFY_API_KEY', '')
 
 # (The rest of the file remains the same as the previously fortified version)
 # ... (process_video_trigger, call_dify_api, send_line_message_with_retry)
