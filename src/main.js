@@ -225,7 +225,27 @@ function showErrorMessage(error) {
 
 // アプリケーション初期化
 function initApp(profile) {
-  console.log('App initialized for user:', profile.displayName)
+  console.log('App initialized for user:', profile.displayName, 'userId:', profile.userId)
+  
+  // userIdが取得できているか確認
+  if (!profile.userId) {
+    console.warn('⚠️ userIdが取得できていません。profile:', profile)
+    // LIFFプロファイルを再取得
+    if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
+      liff.getProfile()
+        .then((updatedProfile) => {
+          if (updatedProfile.userId) {
+            profile.userId = updatedProfile.userId
+            console.log('✅ userIdを再取得:', profile.userId)
+            // 動画アップロードUIを再作成
+            createVideoUploadUI(profile.userId)
+          }
+        })
+        .catch((error) => {
+          console.error('❌ LIFFプロファイル再取得失敗:', error)
+        })
+    }
+  }
   
   // AIKA18号の挨拶（ツンデレ口調）+ スカウター表示
   const userInfo = document.createElement('div')
