@@ -20,6 +20,7 @@ try {
   storage = getStorage(app)
   auth = getAuth(app)
   console.log('✅ Firebase初期化成功')
+  console.log('🔍 使用中のStorageバケット:', FIREBASE_CONFIG.storageBucket)
 } catch (error) {
   console.error('❌ Firebase初期化失敗:', error)
   throw error
@@ -154,6 +155,7 @@ export async function uploadVideoToStorage(videoFile, userId) {
     const storageRef = ref(storage, storagePath)
     
     console.log('📁 ストレージパス:', storagePath)
+    console.log('🔍 Storageバケット:', FIREBASE_CONFIG.storageBucket)
     
     // アップロード実行
     console.log('🔄 アップロードタスク開始...')
