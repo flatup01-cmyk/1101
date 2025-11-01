@@ -493,64 +493,46 @@ function createVideoUploadUI(userId) {
         console.log('🔧 開発モード: 実際のユーザーID:', actualUserId)
       } else {
         // 本番モード（LINE認証）の場合
-        // LIFF認証が完了していることを確認（タイムアウト延長：20秒）
+        // userIdが正しく取得されているか確認
         if (!userId || userId === 'test_user') {
-          // 認証が完了するまで待つ
-          await new Promise((resolve) => {
-            let resolved = false
-            const checkAuth = () => {
-              // LIFFプロファイルを再取得
-              if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
-                liff.getProfile()
-                  .then((profile) => {
-                    if (!resolved && profile.userId) {
-                      resolved = true
-                      actualUserId = profile.userId
-                      console.log('✅ LINE認証成功:', actualUserId)
-                      resolve()
-                    }
-                  })
-                  .catch((error) => {
-                    console.warn('⚠️ LIFFプロファイル取得失敗:', error)
-                    if (!resolved) {
-                      resolved = true
-                      resolve()
-                    }
-                  })
-              } else {
-                if (!resolved) {
-                  resolved = true
-                  console.warn('⚠️ LINE認証が完了していません')
-                  resolve()
+          console.warn('⚠️ LINE認証: userIdが取得できていません。再取得を試みます...')
+          
+          // LIFFが利用可能か確認
+          if (typeof liff === 'undefined' || !liff.isLoggedIn()) {
+            console.error('❌ LIFFが利用できません。LINEアプリ内で開いているか確認してください。')
+            throw new Error('LINE認証が必要です。LINEアプリ内で開いてください。')
+          }
+          
+          // LIFFプロファイルを再取得（リトライ付き）
+          let profileRetrieved = false
+          for (let retry = 0; retry < 3; retry++) {
+            try {
+              const profile = await liff.getProfile()
+              if (profile && profile.userId) {
+                actualUserId = profile.userId
+                profileRetrieved = true
+                console.log('✅ LINE認証成功:', actualUserId)
+                break
+              }
+            } catch (error) {
+                console.warn(`⚠️ LIFFプロファイル取得失敗 (試行 ${retry + 1}/3):`, error)
+                if (retry < 2) {
+                  // 1秒待って再試行
+                  await new Promise(resolve => setTimeout(resolve, 1000))
                 }
               }
             }
             
-            // 即座にチェック
-            checkAuth()
-            
-            // タイムアウト（20秒に延長）
-            setTimeout(() => {
-              if (!resolved) {
-                resolved = true
-                console.warn('⚠️ LINE認証タイムアウト（20秒）')
-                resolve()
-              }
-            }, 20000)
-            
-            // 1秒ごとに再試行（最大5回）
-            let retryCount = 0
-            const retryInterval = setInterval(() => {
-              if (!resolved && retryCount < 5) {
-                retryCount++
-                checkAuth()
-              } else {
-                clearInterval(retryInterval)
-              }
-            }, 1000)
-          })
+            if (!profileRetrieved) {
+              console.error('❌ LINE認証: プロファイル取得に失敗しました')
+              throw new Error('認証タイムアウト: LINEアプリ内でページを再読み込みしてください。')
+            }
+          } else {
+            // userIdが既に取得されている場合、そのまま使用
+            actualUserId = userId
+            console.log('✅ LINE認証: userIdを使用:', actualUserId)
+          }
         }
-      }
       
       // 進捗監視（アップロード開始前に設定）
       const progressHandler = (e) => {
