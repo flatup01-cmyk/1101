@@ -5,7 +5,7 @@ import traceback
 
 import functions_framework
 import requests
-from google.cloud.secretmanager_v1 import SecretManagerServiceClient
+from google.cloud import secretmanager
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from analyze import analyze_kickboxing_form
