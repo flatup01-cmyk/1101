@@ -25,7 +25,9 @@ export const FIREBASE_CONFIG = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '',
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || '',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '',
+  // Storageバケット名: 新しいFirebaseでは .firebasestorage.app が使用される
+  // 環境変数があればそれを使用、なければデフォルト値を設定
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'aikaapp-584fa.firebasestorage.app',
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
   appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
 }
