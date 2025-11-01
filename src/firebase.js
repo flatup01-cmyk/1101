@@ -94,21 +94,43 @@ export async function uploadVideoToStorage(videoFile, userId) {
     if (auth.currentUser) {
       console.log('✅ 認証済み:', auth.currentUser.uid)
     } else {
-      console.warn('⚠️ 認証されていません。開発モードの場合、匿名認証を待機中...')
-      // 認証を待つ（開発モードの場合）
-      await new Promise((resolve, reject) => {
-        const unsubscribe = auth.onAuthStateChanged((user) => {
-          if (user) {
-            unsubscribe()
-            console.log('✅ 匿名認証完了:', user.uid)
-            resolve()
+      console.warn('⚠️ 認証されていません。開発モードの場合、匿名認証を試みます...')
+      
+      // 開発モードの場合、匿名認証を試みる
+      if (LIFF_CONFIG.isDevMode && !auth.currentUser) {
+        try {
+          console.log('🔄 匿名認証を試みます...')
+          await signInAnonymously(auth)
+          console.log('✅ 匿名認証成功:', auth.currentUser.uid)
+        } catch (error) {
+          console.error('❌ 匿名認証失敗:', error)
+          if (error.code === 'auth/configuration-not-found') {
+            const errorMsg = 'Firebase Authenticationが設定されていません。Firebase Console → Authentication → Sign-in method で「匿名」を有効にしてください。\nURL: https://console.firebase.google.com/project/aikaapp-584fa/authentication/providers'
+            console.error('💡', errorMsg)
+            throw new Error(errorMsg)
+          } else if (error.code === 'auth/operation-not-allowed') {
+            const errorMsg = '匿名認証が有効化されていません。Firebase Console → Authentication → Sign-in method で「匿名」を有効にしてください。'
+            console.error('💡', errorMsg)
+            throw new Error(errorMsg)
           }
+          throw error
+        }
+      } else {
+        // 認証を待つ（開発モード以外の場合）
+        await new Promise((resolve, reject) => {
+          const unsubscribe = auth.onAuthStateChanged((user) => {
+            if (user) {
+              unsubscribe()
+              console.log('✅ 匿名認証完了:', user.uid)
+              resolve()
+            }
+          })
+          setTimeout(() => {
+            unsubscribe()
+            reject(new Error('認証タイムアウト'))
+          }, 10000)
         })
-        setTimeout(() => {
-          unsubscribe()
-          reject(new Error('認証タイムアウト'))
-        }, 10000)
-      })
+      }
     }
     
     // セキュリティ: userIdの検証（英数字、ハイフン、アンダースコアのみ）
