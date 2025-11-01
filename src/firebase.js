@@ -29,9 +29,23 @@ export { storage, auth }
 
 // 開発モードでFirebase匿名認証を実行
 if (LIFF_CONFIG.isDevMode) {
+  // Firebase設定の詳細をログ出力（デバッグ用）
+  console.log('🔍 Firebase設定確認:', {
+    apiKey: FIREBASE_CONFIG.apiKey ? `${FIREBASE_CONFIG.apiKey.substring(0, 10)}...` : '未設定',
+    authDomain: FIREBASE_CONFIG.authDomain,
+    projectId: FIREBASE_CONFIG.projectId,
+    hasAuth: !!auth
+  })
+  
   // 少し遅延させてから認証（Firebase初期化が確実に完了してから）
   setTimeout(() => {
+    if (!auth) {
+      console.error('❌ Firebase Authが初期化されていません')
+      return
+    }
+    
     if (!auth.currentUser) {
+      console.log('🔐 匿名認証を開始...')
       signInAnonymously(auth)
         .then(() => {
           console.log('✅ 開発モード: Firebase匿名認証成功')
@@ -41,14 +55,29 @@ if (LIFF_CONFIG.isDevMode) {
           console.error('❌ 開発モード: Firebase匿名認証失敗:', error)
           console.error('エラー詳細:', {
             code: error.code,
-            message: error.message
+            message: error.message,
+            stack: error.stack
           })
+          
+          // エラーコードに応じた解決方法を表示
           if (error.code === 'auth/api-key-not-valid') {
             console.error('💡 解決方法: Netlifyの環境変数 VITE_FIREBASE_API_KEY を確認してください')
+          } else if (error.code === 'auth/configuration-not-found') {
+            console.error('💡 解決方法: Firebase Console → Authentication → Sign-in method で「匿名」を有効にしてください')
+            console.error('💡 URL: https://console.firebase.google.com/project/aikaapp-584fa/authentication/providers')
+          } else if (error.code === 'auth/operation-not-allowed') {
+            console.error('💡 解決方法: Firebase Console → Authentication → Sign-in method で匿名認証が有効になっているか確認してください')
+          } else {
+            console.error('💡 一般的な解決方法:')
+            console.error('   1. Firebase Console → Authentication → Sign-in method で「匿名」を有効化')
+            console.error('   2. Google Cloud Console で Identity Toolkit API が有効か確認')
+            console.error('   3. Netlifyの環境変数が正しく設定されているか確認')
           }
         })
+    } else {
+      console.log('✅ 既に認証済み:', auth.currentUser.uid)
     }
-  }, 500)
+  }, 1000) // 遅延を1秒に延長
 }
 
 /**
