@@ -188,6 +188,50 @@ firebase functions:config:set \
 
 ---
 
+## 📋 ステップ5: Storage自動削除機能のセットアップ（オプション）
+
+Firebase Storageの使用量が2.5GBを超えた場合、自動的に古い動画を削除する機能です。
+
+### 5-1. 自動削除機能について
+
+**実装済み機能**:
+- ✅ 容量ベース削除: 2.5GB超過時に古い動画から削除
+- ✅ 日付ベース削除: 30日以上経過した動画を自動削除
+
+**詳細**: `STORAGE_AUTO_CLEANUP_SETUP.md` を参照してください。
+
+### 5-2. 簡易セットアップ
+
+1. **Functionsをデプロイ**（自動削除機能を含む）
+   ```bash
+   firebase deploy --only functions
+   ```
+
+2. **Cloud Schedulerで定期実行を設定**
+   - Google Cloud Console → Cloud Scheduler
+   - 毎日午前2時に実行するジョブを作成
+
+**詳細手順**: `STORAGE_AUTO_CLEANUP_SETUP.md` を参照
+
+---
+
+## 💡 補足情報
+
+### Storage自動削除機能
+
+動画の容量が100MB、最大10秒に設定されています。
+
+**無料枠**: 5GBまで無料
+**有料化タイミング**: 約51本（100MB×51本 = 約5.1GB）で有料化
+
+**対策**: 自動削除機能で2.5GB以下に自動管理
+- 30日以上経過した動画を自動削除
+- 容量超過時は古い動画から順に削除
+
+詳細: `STORAGE_AUTO_CLEANUP_SETUP.md` を参照
+
+---
+
 **最終更新**: 2025-11-01  
 **状態**: 設定作業が必要
 

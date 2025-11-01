@@ -16,4 +16,6 @@ google-cloud-firestore==2.18.0
 
 # HTTPリクエスト（Dify API、LINE API用）
 requests==2.31.0
+tenacity==8.5.0
+google-cloud-secret-manager==2.20.0
 

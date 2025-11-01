@@ -240,3 +240,86 @@ h1 {
   line-height: 1.6;
 }
 
+/* --- UI Revolution Styles --- */
+
+.action-container {
+  margin-top: 1.5rem;
+  padding: 1.5rem;
+  min-height: 150px; /* Ensure container has height */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 15px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  transition: all 0.3s ease;
+}
+
+#main-action-btn {
+  font-family: 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
+  font-weight: bold;
+  font-size: 1.2rem;
+  color: #fff;
+  background: linear-gradient(145deg, #ff47a8, #ff775c);
+  border: none;
+  border-radius: 50px; /* More rounded */
+  padding: 18px 35px;
+  cursor: pointer;
+  transition: all 0.3s ease-in-out;
+  box-shadow: 0 5px 20px rgba(255, 100, 150, 0.4);
+  transform: scale(1);
+  animation: pulse-animation 2s infinite;
+}
+
+#main-action-btn:hover {
+  transform: scale(1.05) !important; /* Override other transforms */
+  box-shadow: 0 8px 30px rgba(255, 100, 150, 0.6);
+}
+
+#main-action-btn:disabled {
+  background: linear-gradient(145deg, #555, #333);
+  cursor: not-allowed;
+  animation: none;
+  box-shadow: none;
+}
+
+@keyframes pulse-animation {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.03);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.aika-dialogue {
+  font-size: 1rem;
+  font-weight: bold;
+  color: #ffddaa;
+  text-shadow: 0 0 8px rgba(0,0,0,0.5);
+  padding: 10px;
+  animation: message-appear 0.5s ease-out;
+}
+
+#progress-bar-container {
+    width: 80%;
+    height: 10px;
+    background-color: rgba(0, 0, 0, 0.3);
+    border-radius: 5px;
+    margin-top: 15px;
+    overflow: hidden;
+}
+
+#progress-bar {
+    width: 0%;
+    height: 100%;
+    background: linear-gradient(90deg, #64c8ff 0%, #64ff64 100%);
+    border-radius: 5px;
+    transition: width 0.3s ease-in-out;
+}
+

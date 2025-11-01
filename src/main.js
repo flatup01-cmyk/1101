@@ -291,86 +291,41 @@ function initApp(profile) {
   analyzeAndDisplayLandmarks()
 }
 
-// 動画アップロードUI作成（わかりやすい版）
+// 動画アップロードUI作成（革命的UI版）
 function createVideoUploadUI(userId) {
-  const statusDiv = document.querySelector('.status')
-  if (!statusDiv) return
+  const actionContainer = document.getElementById('action-container')
+  if (!actionContainer) return
   
-  // アップロードセクションを作成
+  // 既存のコンテンツを削除
+  actionContainer.innerHTML = ''
+  
+  // 最小限のUI：巨大なアップロードボタンだけ
   const uploadSection = document.createElement('div')
   uploadSection.className = 'upload-section'
-  uploadSection.style.cssText = 'margin-top: 2rem; padding: 1.5rem; background: rgba(255,255,255,0.15); border-radius: 10px;'
   uploadSection.innerHTML = `
-    <div style="margin-bottom: 1.5rem; padding: 12px; background: rgba(0, 0, 0, 0.3); border-radius: 8px; border: 1px solid rgba(100, 200, 255, 0.4); font-family: 'Courier New', monospace;">
-      <div style="font-size: 0.75rem; color: #64c8ff; margin-bottom: 5px; text-align: left;">
-        ▸ VIDEO ANALYSIS MODULE
-      </div>
-      <h3 style="margin-bottom: 0.5rem; font-size: 1.2rem; color: #fff;">📹 動画解析システム</h3>
-      <p style="font-size: 0.9rem; opacity: 0.9; line-height: 1.5; margin: 0;">
-        フン、動画を選んで「解析開始」を押せば、AIKA18号のバトルスコープが自動で戦闘力を採点してやるわよ。<br>
-        <span style="font-size: 0.85rem; color: #ff9800; font-weight: bold; margin-top: 5px; display: block;">
-          ⚠️ 注意：10秒以内、100MB以内の動画に収めてなさいよ。
-        </span>
-      </p>
+    <!-- 隠しファイル入力 -->
+    <input type="file" id="videoInput" accept="video/*" style="display: none;" />
+    
+    <!-- 巨大なアップロードボタン（中央配置） -->
+    <div class="main-upload-area">
+      <button id="selectVideoBtn" class="giant-upload-btn">
+        <div class="btn-icon">📹</div>
+        <div class="btn-text">…別に、アンタの動画を<br>解析してやってもいいけど？</div>
+        <div class="btn-hint">10秒以内・100MB以内</div>
+      </button>
     </div>
     
-    <!-- ステップ表示エリア -->
-    <div id="stepsGuide" style="margin-bottom: 1.5rem; padding: 15px; background: rgba(0, 0, 0, 0.2); border-radius: 8px; border-left: 4px solid #64c8ff;">
-      <div style="font-size: 0.9rem; font-weight: bold; color: #64c8ff; margin-bottom: 10px;">📋 使い方（とっても簡単よ）</div>
-      <div style="font-size: 0.85rem; line-height: 1.8; color: #fff;">
-        <div style="margin-bottom: 8px;">
-          <strong style="color: #64ff64;">①</strong> 下の「📁 動画を選ぶ」ボタンを押す
-        </div>
-        <div style="margin-bottom: 8px;">
-          <strong style="color: #64ff64;">②</strong> スマホから動画を選ぶ（10秒以内、100MB以内）
-        </div>
-        <div style="margin-bottom: 8px;">
-          <strong style="color: #64ff64;">③</strong> 一番下の「🚀 解析開始」ボタンを押す
-        </div>
-          <div style="font-size: 0.75rem; color: #ff9800; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.2);">
-          💡 解析開始を押すと、自動でアップロードされて解析が始まるわよ。結果はLINEで届くから待ってなさい。<br>
-          <span style="color: #ff6464; font-weight: bold;">⚠️ 動画は10秒以内、100MB以内に収めてなさいよ。大きすぎると受け付けないわ。</span>
-        </div>
-      </div>
-    </div>
+    <!-- プレビューエリア（最小限） -->
+    <div id="videoPreview" class="video-preview" style="display: none;"></div>
     
-    <!-- ファイル選択ボタン（わかりやすい位置） -->
-    <input 
-      type="file" 
-      id="videoInput" 
-      accept="video/*" 
-      style="display: none;"
-    />
-    <button 
-      id="selectVideoBtn" 
-      class="upload-button"
-      style="width: 100%; padding: 14px 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; border-radius: 8px; color: white; font-size: 1.1rem; cursor: pointer; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.2); margin-bottom: 1rem;"
-    >
-      📁 動画を選ぶ（10秒以内・100MB以内）
-    </button>
-    
-    <!-- プレビューエリア -->
-    <div id="videoPreview" style="display: none; margin-top: 1rem; margin-bottom: 1rem;"></div>
-    
-    <!-- 進捗表示エリア -->
-    <div id="uploadProgress" style="display: none; margin-top: 1rem; margin-bottom: 1rem;"></div>
-    
-    <!-- 解析開始ボタン（一番下に配置） -->
-    <button 
-      id="uploadBtn" 
-      style="display: none; width: 100%; margin-top: 2rem; padding: 16px 24px; background: linear-gradient(135deg, #64ff64 0%, #64c8ff 100%); border: none; border-radius: 8px; color: #000; font-size: 1.2rem; cursor: pointer; font-weight: bold; box-shadow: 0 6px 20px rgba(100, 255, 255, 0.4); transition: transform 0.2s;"
-      onmouseover="this.style.transform='scale(1.02)'"
-      onmouseout="this.style.transform='scale(1)'"
-    >
-      🚀 解析開始
-    </button>
+    <!-- 進捗表示（ツンデレ風） -->
+    <div id="uploadProgress" class="upload-progress" style="display: none;"></div>
   `
-  statusDiv.appendChild(uploadSection)
+  actionContainer.appendChild(uploadSection)
   
   // イベントリスナー設定
   const videoInput = document.getElementById('videoInput')
   const selectBtn = document.getElementById('selectVideoBtn')
-  const uploadBtn = document.getElementById('uploadBtn')
   const previewDiv = document.getElementById('videoPreview')
   const progressDiv = document.getElementById('uploadProgress')
   
@@ -393,61 +348,117 @@ function createVideoUploadUI(userId) {
       return
     }
     
-    // 動画の長さもチェック（10秒制限）
-    // プレビュー表示
+    // プレビュー表示（読み込み中表示・ツンデレ風）
+    previewDiv.innerHTML = `
+      <div style="padding: 20px; background: rgba(0, 0, 0, 0.4); border-radius: 12px; text-align: center; border: 2px solid rgba(255, 107, 157, 0.5);">
+        <div style="font-size: 1.2rem; margin-bottom: 10px;">💭</div>
+        <div style="font-size: 0.9rem; color: #ff6b9d; margin-bottom: 10px; font-family: 'Courier New', monospace;">
+          …ちょっと待ちなさい。今、動画を確認してるんだから。
+        </div>
+      </div>
+    `
+    previewDiv.style.display = 'block'
+    selectBtn.disabled = true
+    selectBtn.classList.add('loading-state')
+    selectedFile = null
+    
+    // 動画の長さをチェック（10秒制限）
     const video = document.createElement('video')
     video.src = URL.createObjectURL(file)
     video.controls = true
     video.style.cssText = 'width: 100%; max-height: 300px; border-radius: 8px; margin-top: 1rem;'
     
-    // 動画の長さを取得してチェック
-    video.addEventListener('loadedmetadata', () => {
+    // 動画のメタデータ読み込みを待つ
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('動画のメタデータ読み込みがタイムアウトしました'))
+      }, 10000) // 10秒タイムアウト
+      
+      video.addEventListener('loadedmetadata', () => {
+        clearTimeout(timeout)
+        resolve()
+      }, { once: true })
+      
+      video.addEventListener('error', (e) => {
+        clearTimeout(timeout)
+        reject(new Error('動画ファイルの読み込みに失敗しました'))
+      }, { once: true })
+      
+      // メタデータ読み込みを開始
+      video.load()
+    }).then(() => {
+      // メタデータ読み込み成功
       const duration = video.duration
-      if (duration > 10) {
-        alert('…チッ、10秒以内の動画を選択しろよ。長すぎて解析できやしないわ。10秒以内、100MB以内に収めてなさい。')
+      
+      if (isNaN(duration) || duration <= 0) {
+        alert('…この動画、読めないわ。別の動画を選びなさい。')
         videoInput.value = ''
         previewDiv.innerHTML = ''
         previewDiv.style.display = 'none'
-        uploadBtn.style.display = 'none'
+        selectBtn.disabled = false
+        selectBtn.classList.remove('loading-state')
+        selectedFile = null
+        return
+      }
+      
+      if (duration > 10) {
+        alert(`…チッ、長すぎるわよ！\n\n今の動画: ${duration.toFixed(1)}秒\n10秒以内に収めなさい。…別に、アンタのために言ってるわけじゃないからね。`)
+        videoInput.value = ''
+        previewDiv.innerHTML = ''
+        previewDiv.style.display = 'none'
+        selectBtn.disabled = false
+        selectBtn.classList.remove('loading-state')
         selectedFile = null
         return
       }
       
       // 動画の長さがOKなら、ファイルを選択状態にする
       selectedFile = file
-      uploadBtn.style.display = 'block'
-    })
-    
-    // エラー時の処理
-    video.addEventListener('error', () => {
-      alert('動画ファイルの読み込みに失敗しました。別の動画を選択してください。')
+      
+      // プレビュー表示を更新（ツンデレ風）
+      previewDiv.innerHTML = ''
+      previewDiv.appendChild(video)
+      
+      // ファイル情報表示（ツンデレ風）
+      const fileInfo = document.createElement('div')
+      fileInfo.style.cssText = 'margin-top: 1rem; padding: 15px; background: rgba(255, 107, 157, 0.15); border-radius: 12px; border: 2px solid rgba(255, 107, 157, 0.4); font-family: "Courier New", monospace;'
+      fileInfo.innerHTML = `
+        <div style="font-size: 1rem; color: #ff6b9d; margin-bottom: 8px; text-align: center;">
+          …まあ、この動画なら解析してやってもいいわよ
+        </div>
+        <div style="font-size: 0.85rem; color: #fff; opacity: 0.9; text-align: center; margin-bottom: 10px;">
+          ${escapeHtml(file.name)}<br>
+          ${(file.size / 1024 / 1024).toFixed(2)}MB・${duration.toFixed(1)}秒
+        </div>
+        <div style="text-align: center;">
+          <button id="uploadBtn" class="giant-upload-btn" style="width: auto; height: auto; padding: 12px 32px; border-radius: 25px; font-size: 1rem;">
+            <div class="btn-icon" style="font-size: 1.5rem;">🚀</div>
+            <div class="btn-text" style="font-size: 0.9rem;">…解析してもいいわよ</div>
+          </button>
+        </div>
+      `
+      previewDiv.appendChild(fileInfo)
+      
+      selectBtn.disabled = false
+      selectBtn.classList.remove('loading-state')
+      
+      // 解析開始ボタンのイベントを設定
+      const uploadBtn = document.getElementById('uploadBtn')
+      if (uploadBtn && !uploadBtn.hasAttribute('data-listener-added')) {
+        uploadBtn.setAttribute('data-listener-added', 'true')
+        uploadBtn.addEventListener('click', () => handleUpload(selectedFile, userId, progressDiv, previewDiv))
+      }
+      
+    }).catch((error) => {
+      // エラー時
+      console.error('動画読み込みエラー:', error)
+      alert(`動画ファイルの読み込みに失敗しました: ${error.message}\n\n別の動画を選択してください。`)
       videoInput.value = ''
       previewDiv.innerHTML = ''
       previewDiv.style.display = 'none'
       uploadBtn.style.display = 'none'
       selectedFile = null
     })
-    
-    previewDiv.innerHTML = ''
-    previewDiv.appendChild(video)
-    previewDiv.style.display = 'block'
-    
-    // ファイル情報表示（わかりやすく）
-    const fileInfo = document.createElement('div')
-    fileInfo.style.cssText = 'margin-top: 0.8rem; padding: 10px; background: rgba(100, 255, 100, 0.15); border-radius: 6px; border: 1px solid rgba(100, 255, 100, 0.3);'
-    fileInfo.innerHTML = `
-      <div style="font-size: 0.9rem; color: #64ff64; margin-bottom: 5px;">
-        ✅ 動画が選ばれました！
-      </div>
-      <div style="font-size: 0.85rem; color: #fff; opacity: 0.9;">
-        ファイル名: ${escapeHtml(file.name)}<br>
-        サイズ: ${(file.size / 1024 / 1024).toFixed(2)}MB
-      </div>
-      <div style="font-size: 0.75rem; color: #ff9800; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.2);">
-        💡 下の「🚀 解析開始」ボタンを押してね！
-      </div>
-    `
-    previewDiv.appendChild(fileInfo)
     
     // ステップガイドを更新
     const stepsGuide = document.getElementById('stepsGuide')

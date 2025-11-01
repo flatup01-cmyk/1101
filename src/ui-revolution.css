@@ -1,0 +1,183 @@
+/* ========================================
+   UI革命：思考停止で使える、ハマるUI
+   ======================================== */
+
+/* メインアップロードエリア */
+.main-upload-area {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 60vh;
+  padding: 2rem;
+}
+
+/* 巨大なアップロードボタン（中毒性のあるデザイン） */
+.giant-upload-btn {
+  width: min(90vw, 400px);
+  height: min(90vw, 400px);
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(135deg, #ff6b9d 0%, #c44569 50%, #ff6b9d 100%);
+  background-size: 200% 200%;
+  color: white;
+  font-size: clamp(1.2rem, 4vw, 1.8rem);
+  font-weight: bold;
+  cursor: pointer;
+  box-shadow: 
+    0 20px 60px rgba(255, 107, 157, 0.4),
+    0 0 0 0 rgba(255, 107, 157, 0.7),
+    inset 0 2px 10px rgba(255, 255, 255, 0.3);
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* ボタンのアイコン */
+.btn-icon {
+  font-size: clamp(3rem, 12vw, 5rem);
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3));
+  animation: icon-bounce 2s ease-in-out infinite;
+}
+
+/* ボタンのテキスト */
+.btn-text {
+  font-family: 'Courier New', monospace;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+  line-height: 1.4;
+  padding: 0 1rem;
+}
+
+/* ボタンのヒント */
+.btn-hint {
+  font-size: clamp(0.7rem, 2vw, 0.9rem);
+  opacity: 0.8;
+  font-weight: normal;
+}
+
+/* ホバー時の効果（押す快感） */
+.giant-upload-btn:hover {
+  transform: scale(1.05);
+  box-shadow: 
+    0 25px 70px rgba(255, 107, 157, 0.5),
+    0 0 0 10px rgba(255, 107, 157, 0.3),
+    inset 0 2px 10px rgba(255, 255, 255, 0.4);
+  animation: hover-pulse 0.5s ease-in-out;
+}
+
+/* クリック時の効果 */
+.giant-upload-btn:active {
+  transform: scale(0.95);
+  box-shadow: 
+    0 15px 40px rgba(255, 107, 157, 0.3),
+    0 0 0 5px rgba(255, 107, 157, 0.5),
+    inset 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+/* ボタンが無効な状態 */
+.giant-upload-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  animation: none;
+}
+
+/* アニメーション：脈動する光 */
+@keyframes pulse-glow {
+  0%, 100% {
+    background-position: 0% 50%;
+    box-shadow: 
+      0 20px 60px rgba(255, 107, 157, 0.4),
+      0 0 0 0 rgba(255, 107, 157, 0.7);
+  }
+  50% {
+    background-position: 100% 50%;
+    box-shadow: 
+      0 25px 70px rgba(255, 107, 157, 0.6),
+      0 0 0 15px rgba(255, 107, 157, 0.3);
+  }
+}
+
+/* アニメーション：アイコンのバウンス */
+@keyframes icon-bounce {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-10px) scale(1.1);
+  }
+}
+
+/* アニメーション：ホバー時のパルス */
+@keyframes hover-pulse {
+  0%, 100% {
+    transform: scale(1.05);
+  }
+  50% {
+    transform: scale(1.08);
+  }
+}
+
+/* プレビューエリア（最小限） */
+.video-preview {
+  margin-top: 2rem;
+  animation: slide-up 0.3s ease-out;
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 進捗表示（ツンデレ風） */
+.upload-progress {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 12px;
+  border: 2px solid rgba(255, 107, 157, 0.5);
+  animation: slide-up 0.3s ease-out;
+  font-family: 'Courier New', monospace;
+}
+
+/* レスポンシブ対応 */
+@media (max-width: 768px) {
+  .giant-upload-btn {
+    width: min(85vw, 350px);
+    height: min(85vw, 350px);
+  }
+  
+  .btn-text {
+    font-size: clamp(1rem, 3.5vw, 1.5rem);
+  }
+}
+
+/* 読み込み中の状態 */
+.loading-state {
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.loading-state .giant-upload-btn {
+  animation: loading-rotate 2s linear infinite;
+}
+
+@keyframes loading-rotate {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
