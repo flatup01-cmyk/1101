@@ -111,6 +111,42 @@ def process_video(data, context):
             temp_path = temp_file.name
             blob.download_to_filename(temp_path)
             print(f"ダウンロード完了: {temp_path}")
+            
+            # ファイルサイズチェック（100MB制限）
+            file_size = os.path.getsize(temp_path)
+            max_size = 100 * 1024 * 1024  # 100MB
+            if file_size > max_size:
+                print(f"❌ ファイルサイズ超過: {file_size / 1024 / 1024:.2f}MB > 100MB")
+                try:
+                    send_line_message(user_id, "ごめんあそばせ。動画ファイルが大きすぎるわ（100MB以下に収めて）。")
+                except Exception:
+                    pass
+                return {"status": "error", "reason": "file size too large"}
+            
+            # 動画の長さチェック（10秒制限）
+            import cv2
+            cap = cv2.VideoCapture(temp_path)
+            if not cap.isOpened():
+                print(f"❌ 動画ファイルを開けません: {temp_path}")
+                cap.release()
+                return {"status": "error", "reason": "cannot open video file"}
+            
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+            cap.release()
+            
+            if fps > 0:
+                duration = frame_count / fps
+                if duration > 10:
+                    print(f"❌ 動画の長さ超過: {duration:.2f}秒 > 10秒")
+                    try:
+                        send_line_message(user_id, "ごめんあそばせ。動画が長すぎるわ（10秒以内に収めて）。")
+                    except Exception:
+                        pass
+                    return {"status": "error", "reason": "video duration too long"}
+            else:
+                print("⚠️ FPSが取得できませんでした。動画の長さチェックをスキップします。")
+                
     except Exception as download_error:
         print(f"ファイルダウンロードエラー: {str(download_error)}")
         return {"status": "error", "reason": "download failed"}
