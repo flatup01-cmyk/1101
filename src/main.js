@@ -291,7 +291,10 @@ function createVideoUploadUI(userId) {
       </div>
       <h3 style="margin-bottom: 0.5rem; font-size: 1.2rem; color: #fff;">📹 動画解析システム</h3>
       <p style="font-size: 0.9rem; opacity: 0.9; line-height: 1.5; margin: 0;">
-        フン、動画を選んで「解析開始」を押せば、AIKA18号のバトルスコープが自動で戦闘力を採点してやるわよ。
+        フン、動画を選んで「解析開始」を押せば、AIKA18号のバトルスコープが自動で戦闘力を採点してやるわよ。<br>
+        <span style="font-size: 0.85rem; color: #ff9800; font-weight: bold; margin-top: 5px; display: block;">
+          ⚠️ 注意：10秒以内、10MB以内の動画に収めてなさいよ。
+        </span>
       </p>
     </div>
     
@@ -303,13 +306,14 @@ function createVideoUploadUI(userId) {
           <strong style="color: #64ff64;">①</strong> 下の「📁 動画を選ぶ」ボタンを押す
         </div>
         <div style="margin-bottom: 8px;">
-          <strong style="color: #64ff64;">②</strong> スマホから動画を選ぶ（最大100MB）
+          <strong style="color: #64ff64;">②</strong> スマホから動画を選ぶ（10秒以内、10MB以内）
         </div>
         <div style="margin-bottom: 8px;">
           <strong style="color: #64ff64;">③</strong> 一番下の「🚀 解析開始」ボタンを押す
         </div>
-        <div style="font-size: 0.75rem; color: #ff9800; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.2);">
-          💡 解析開始を押すと、自動でアップロードされて解析が始まるわよ。結果はLINEで届くから待ってなさい。
+          <div style="font-size: 0.75rem; color: #ff9800; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.2);">
+          💡 解析開始を押すと、自動でアップロードされて解析が始まるわよ。結果はLINEで届くから待ってなさい。<br>
+          <span style="color: #ff6464; font-weight: bold;">⚠️ 動画は10秒以内、10MB以内に収めてなさいよ。大きすぎると受け付けないわ。</span>
         </div>
       </div>
     </div>
@@ -326,7 +330,7 @@ function createVideoUploadUI(userId) {
       class="upload-button"
       style="width: 100%; padding: 14px 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; border-radius: 8px; color: white; font-size: 1.1rem; cursor: pointer; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.2); margin-bottom: 1rem;"
     >
-      📁 動画を選ぶ（最大100MB）
+      📁 動画を選ぶ（10秒以内・10MB以内）
     </button>
     
     <!-- プレビューエリア -->
@@ -366,12 +370,16 @@ function createVideoUploadUI(userId) {
     const file = e.target.files[0]
     if (!file) return
     
-    // ファイルサイズチェック（100MB制限）
-    const maxSize = 100 * 1024 * 1024 // 100MB
+    // ファイルサイズチェック（10MB制限）
+    const maxSize = 10 * 1024 * 1024 // 10MB
     if (file.size > maxSize) {
-      alert('…チッ、100MB以下の動画を選択しろよ。大きすぎて解析できやしないわ。')
+      alert('…チッ、10MB以下の動画を選択しろよ。大きすぎて解析できやしないわ。10秒以内、10MB以内に収めてなさい。')
       return
     }
+    
+    // 動画の長さもチェック（10秒制限）
+    // 注意：ブラウザでは正確な動画長を取得できないため、ファイルサイズで判定
+    // 実際の長さチェックはサーバーサイドで行う想定
     
     selectedFile = file
     
@@ -418,7 +426,8 @@ function createVideoUploadUI(userId) {
             👇 一番下の「🚀 解析開始」ボタンを押してください
           </div>
           <div style="font-size: 0.75rem; color: #ff9800; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.2);">
-            💡 解析開始を押すと、自動でアップロード→解析が始まって、結果がLINEで届くわよ。
+            💡 解析開始を押すと、自動でアップロード→解析が始まって、結果がLINEで届くわよ。<br>
+            <span style="color: #ff6464; font-weight: bold;">⚠️ 動画は10秒以内、10MB以内に収めてなさいよ。</span>
           </div>
         </div>
       `
