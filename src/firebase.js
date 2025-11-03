@@ -303,10 +303,25 @@ export async function uploadVideoToStorage(videoFile, userId, progressCallback) 
     const storagePath = `videos/${firebaseUid}/${jobId}/${videoFile.name}`;
     const storageRef = ref(storage, storagePath);
 
+    // 認証状態を詳細にログ出力（デバッグ用）
     console.log(`🚀 Starting upload for job ${jobId} to ${storagePath}`);
     console.log(`📋 Firebase UID: ${firebaseUid}`);
     console.log(`📋 LIFF User ID: ${userId}`);
     console.log(`📋 Auth provider: ${auth.currentUser?.providerData?.[0]?.providerId || 'anonymous'}`);
+    console.log(`📋 Auth token: ${auth.currentUser ? 'present' : 'missing'}`);
+    console.log(`📋 Auth UID matches path: ${auth.currentUser?.uid === firebaseUid ? 'YES' : 'NO'}`);
+    
+    // 認証トークンの有効性を確認
+    try {
+        const token = await auth.currentUser.getIdToken(true); // 強制リフレッシュ
+        console.log(`✅ Auth token retrieved: ${token.substring(0, 20)}...`);
+    } catch (tokenError) {
+        console.error('❌ Failed to get auth token:', tokenError);
+        // トークン取得失敗時は再認証を試みる
+        await ensureAnonymousAuth();
+        const newToken = await auth.currentUser.getIdToken(true);
+        console.log(`✅ Re-authenticated and got new token: ${newToken.substring(0, 20)}...`);
+    }
 
     // 3. Execute the upload with enhanced progress tracking.
     metrics.storageOps++;

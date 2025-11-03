@@ -397,51 +397,115 @@ function getVideoDuration(file) {
     video.preload = 'metadata';
     video.muted = true; // モバイルで音声再生がブロックされないように
     video.playsInline = true; // iOSでインライン再生を許可
+    // crossOriginはローカルファイルには不要（削除）
     
     let timeoutId;
     let objectURL;
+    let errorOccurred = false;
     
-    // 30秒タイムアウト（モバイルでのメタデータ読み込み遅延に対応）
+    // 60秒タイムアウト（モバイルでのメタデータ読み込み遅延に対応）
     timeoutId = setTimeout(() => {
-      cleanup();
-      reject(new Error('動画の読み込みがタイムアウトしました。ネットワーク環境を確認してください。'));
-    }, 30000);
+      if (!errorOccurred) {
+        errorOccurred = true;
+        cleanup();
+        reject(new Error('動画の読み込みがタイムアウトしました。ネットワーク環境を確認してください。'));
+      }
+    }, 60000);
     
     const cleanup = () => {
       clearTimeout(timeoutId);
       if (objectURL) {
-        window.URL.revokeObjectURL(objectURL);
+        try {
+          window.URL.revokeObjectURL(objectURL);
+        } catch (e) {
+          console.warn('Failed to revoke object URL:', e);
+        }
       }
       video.src = '';
+      video.removeAttribute('src');
       video.load(); // リソースを解放
+      video.onloadedmetadata = null;
+      video.onerror = null;
+      video.oncanplay = null;
     };
     
     video.onloadedmetadata = () => {
-      const duration = video.duration;
-      cleanup();
+      if (errorOccurred) return;
       
-      if (isNaN(duration) || duration <= 0) {
-        reject(new Error('動画の長さを取得できませんでした。'));
-        return;
+      try {
+        const duration = video.duration;
+        console.log(`✅ Video metadata loaded: ${duration}s`);
+        
+        if (isNaN(duration) || duration <= 0 || !isFinite(duration)) {
+          cleanup();
+          reject(new Error('動画の長さを取得できませんでした。動画ファイルが破損している可能性があります。'));
+          return;
+        }
+        
+        cleanup();
+        resolve(duration);
+      } catch (e) {
+        cleanup();
+        reject(new Error(`動画メタデータの処理中にエラーが発生しました: ${e.message}`));
       }
-      
-      resolve(duration);
     };
     
     video.onerror = (e) => {
+      if (errorOccurred) return;
+      errorOccurred = true;
+      
+      const error = video.error;
+      let errorMessage = '動画ファイルを読み込めませんでした。';
+      
+      if (error) {
+        switch (error.code) {
+          case MediaError.MEDIA_ERR_ABORTED:
+            errorMessage = '動画の読み込みが中断されました。';
+            break;
+          case MediaError.MEDIA_ERR_NETWORK:
+            errorMessage = 'ネットワークエラーにより動画を読み込めませんでした。';
+            break;
+          case MediaError.MEDIA_ERR_DECODE:
+            errorMessage = '動画のデコードに失敗しました。ファイル形式が正しくない可能性があります。';
+            break;
+          case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+            errorMessage = 'この動画形式はサポートされていません。MP4またはMOV形式を試してください。';
+            break;
+          default:
+            errorMessage = `動画の読み込みエラー (コード: ${error.code})。別の動画ファイルを試してください。`;
+        }
+      }
+      
+      console.error('❌ Video loading error:', {
+        code: error?.code,
+        message: error?.message,
+        file: file.name,
+        fileSize: file.size,
+        fileType: file.type
+      });
+      
       cleanup();
-      reject(new Error('動画ファイルを読み込めませんでした。ファイル形式を確認してください。'));
+      reject(new Error(errorMessage));
     };
     
     // メタデータ読み込みを開始
     try {
+      console.log(`📹 Loading video metadata for file: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)}MB, type: ${file.type || 'unknown'})`);
+      
+      // ファイルタイプの検証
+      if (!file.type || !file.type.startsWith('video/')) {
+        console.warn('⚠️ File type may not be a video:', file.type);
+      }
+      
       objectURL = window.URL.createObjectURL(file);
       video.src = objectURL;
       video.load(); // 明示的に読み込み開始
     } catch (error) {
+      errorOccurred = true;
       cleanup();
-      reject(new Error('動画ファイルの処理中にエラーが発生しました。'));
-  }
+      console.error('❌ Error creating object URL or loading video:', error);
+      reject(new Error(`動画ファイルの処理中にエラーが発生しました: ${error.message}`));
+    }
   });
 }
 
