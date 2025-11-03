@@ -355,25 +355,29 @@ def process_video(data, context):
     
     logger.info(f"処理対象ユーザー: Firebase UID={firebase_uid}, LINE User ID={line_user_id or 'N/A'}")
     
-    # レートリミットチェック
-    is_allowed, rate_limit_message = check_rate_limit(user_id, 'upload_video')
+    # レートリミットチェック（LINE User IDを使用）
+    # line_user_idが取得できた場合はそれを使用、ない場合はfirebase_uidをフォールバック
+    rate_limit_user_id = line_user_id if line_user_id else firebase_uid
+    is_allowed, rate_limit_message = check_rate_limit(rate_limit_user_id, 'upload_video')
     if not is_allowed:
-        logger.warning(f"❌ レートリミット超過: {user_id} - {rate_limit_message}")
+        logger.warning(f"❌ レートリミット超過: {rate_limit_user_id} (LINE ID: {line_user_id or 'N/A'}, Firebase UID: {firebase_uid}) - {rate_limit_message}")
         try:
-            # 簡易的なLINEメッセージ送信（エラーは無視）
-            LINE_CHANNEL_ACCESS_TOKEN = access_secret_version("LINE_CHANNEL_ACCESS_TOKEN", PROJECT_ID)
-            if LINE_CHANNEL_ACCESS_TOKEN:
-                requests.post(
-                    'https://api.line.me/v2/bot/message/push',
-                    headers={'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}', 'Content-Type': 'application/json'},
-                    json={'to': user_id, 'messages': [{'type': 'text', 'text': f"ごめんあそばせ。{rate_limit_message}"}]},
-                    timeout=10
-                )
+            # LINE通知にはline_user_idが必要
+            if line_user_id:
+                # 簡易的なLINEメッセージ送信（エラーは無視）
+                LINE_CHANNEL_ACCESS_TOKEN = access_secret_version("LINE_CHANNEL_ACCESS_TOKEN", PROJECT_ID)
+                if LINE_CHANNEL_ACCESS_TOKEN:
+                    requests.post(
+                        'https://api.line.me/v2/bot/message/push',
+                        headers={'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}', 'Content-Type': 'application/json'},
+                        json={'to': line_user_id, 'messages': [{'type': 'text', 'text': f"ごめんあそばせ。{rate_limit_message}"}]},
+                        timeout=10
+                    )
         except Exception as notify_error:
             logger.error(f"レートリミット通知エラー: {str(notify_error)}")
         return {"status": "rate_limit_exceeded", "reason": rate_limit_message}
     
-    logger.info(f"✓ レートリミットチェック通過: {user_id}")
+    logger.info(f"✓ レートリミットチェック通過: {rate_limit_user_id} (LINE ID: {line_user_id or 'N/A'})")
     
     # 【冪等性確保】Firestoreで処理済みチェック
     # jobIdが存在する場合はそれを使用、ない場合はファイルパスをハッシュ化
@@ -413,7 +417,9 @@ def process_video(data, context):
             transaction.set(processing_doc_ref, {
                 'status': 'processing',
                 'file_path': file_path,
-                'user_id': user_id,
+                'user_id': rate_limit_user_id,  # LINE User IDを優先
+                'firebase_uid': firebase_uid,
+                'line_user_id': line_user_id,
                 'started_at': firestore.SERVER_TIMESTAMP,
                 'updated_at': firestore.SERVER_TIMESTAMP
             })
@@ -447,14 +453,16 @@ def process_video(data, context):
                 logger.error(f"❌ ファイルサイズ超過: {file_size / 1024 / 1024:.2f}MB > 100MB")
                 try:
                     # 簡易的なLINEメッセージ送信（エラーは無視）
-                    LINE_CHANNEL_ACCESS_TOKEN = access_secret_version("LINE_CHANNEL_ACCESS_TOKEN", PROJECT_ID)
-                    if LINE_CHANNEL_ACCESS_TOKEN:
-                        requests.post(
-                            'https://api.line.me/v2/bot/message/push',
-                            headers={'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}', 'Content-Type': 'application/json'},
-                            json={'to': user_id, 'messages': [{'type': 'text', 'text': "ごめんあそばせ。動画ファイルが大きすぎるわ（100MB以下に収めて）。"}]},
-                            timeout=10
-                        )
+                    # LINE通知にはline_user_idが必要
+                    if line_user_id:
+                        LINE_CHANNEL_ACCESS_TOKEN = access_secret_version("LINE_CHANNEL_ACCESS_TOKEN", PROJECT_ID)
+                        if LINE_CHANNEL_ACCESS_TOKEN:
+                            requests.post(
+                                'https://api.line.me/v2/bot/message/push',
+                                headers={'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}', 'Content-Type': 'application/json'},
+                                json={'to': line_user_id, 'messages': [{'type': 'text', 'text': "ごめんあそばせ。動画ファイルが大きすぎるわ（100MB以下に収めて）。"}]},
+                                timeout=10
+                            )
                 except Exception:
                     pass
                 # Firestoreを更新（エラー状態）
@@ -488,14 +496,16 @@ def process_video(data, context):
                     logger.error(f"❌ 動画の長さ超過: {duration:.2f}秒 > 20秒")
                     try:
                         # 簡易的なLINEメッセージ送信（エラーは無視）
-                        LINE_CHANNEL_ACCESS_TOKEN = access_secret_version("LINE_CHANNEL_ACCESS_TOKEN", PROJECT_ID)
-                        if LINE_CHANNEL_ACCESS_TOKEN:
-                            requests.post(
-                                'https://api.line.me/v2/bot/message/push',
-                                headers={'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}', 'Content-Type': 'application/json'},
-                                json={'to': user_id, 'messages': [{'type': 'text', 'text': "ごめんあそばせ。動画が長すぎるわ（20秒以内に収めて）。"}]},
-                                timeout=10
-                            )
+                        # LINE通知にはline_user_idが必要
+                        if line_user_id:
+                            LINE_CHANNEL_ACCESS_TOKEN = access_secret_version("LINE_CHANNEL_ACCESS_TOKEN", PROJECT_ID)
+                            if LINE_CHANNEL_ACCESS_TOKEN:
+                                requests.post(
+                                    'https://api.line.me/v2/bot/message/push',
+                                    headers={'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}', 'Content-Type': 'application/json'},
+                                    json={'to': line_user_id, 'messages': [{'type': 'text', 'text': "ごめんあそばせ。動画が長すぎるわ（20秒以内に収めて）。"}]},
+                                    timeout=10
+                                )
                     except Exception:
                         pass
                     processing_doc_ref.update({
@@ -530,7 +540,9 @@ def process_video(data, context):
             return analysis_result
         
         # 4. MCPスタイルでDify APIに送信してAIKAのセリフを生成
-        aika_message = call_dify_via_mcp(analysis_result['scores'], user_id)
+        # line_user_idを優先、ない場合はfirebase_uidを使用
+        dify_user_id = line_user_id if line_user_id else firebase_uid
+        aika_message = call_dify_via_mcp(analysis_result['scores'], dify_user_id)
         
         if not aika_message:
             logger.warning("⚠️ Dify MCPからメッセージが取得できませんでした")
@@ -573,7 +585,8 @@ def process_video(data, context):
         alert_payload = {
             "severity": "ERROR",
             "message": f"CRITICAL: 動画処理エラー - {file_path}",
-            "user_id": user_id,
+            "firebase_uid": firebase_uid,
+            "line_user_id": line_user_id or "N/A",
             "file_path": file_path,
             "error": str(e),
             "timestamp": datetime.utcnow().isoformat()
