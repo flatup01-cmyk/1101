@@ -1,7 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getStorage, ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { getAuth, signInAnonymously } from 'firebase/auth';
-import { getFirestore, collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, collection, addDoc, serverTimestamp, enableNetwork, disableNetwork } from 'firebase/firestore';
 import { FIREBASE_CONFIG } from './config.js';
 
 // --- Firebase Initialization ---
@@ -12,31 +12,134 @@ const firestore = getFirestore(app);
 
 console.log('✅ Firebase Core Services Initialized');
 
+// --- Performance Metrics ---
+const metrics = {
+    authAttempts: 0,
+    authSuccess: 0,
+    authFailures: 0,
+    firestoreOps: 0,
+    storageOps: 0,
+    startTime: Date.now()
+};
+
+// --- Network State Monitoring ---
+let isOnline = navigator.onLine;
+let networkListeners = [];
+
+window.addEventListener('online', () => {
+    isOnline = true;
+    console.log('🌐 Network online - re-enabling Firestore');
+    enableNetwork(firestore).catch(err => console.error('Failed to enable Firestore:', err));
+    networkListeners.forEach(listener => listener(true));
+});
+
+window.addEventListener('offline', () => {
+    isOnline = false;
+    console.warn('⚠️ Network offline - disabling Firestore');
+    disableNetwork(firestore).catch(err => console.error('Failed to disable Firestore:', err));
+    networkListeners.forEach(listener => listener(false));
+});
+
 /**
- * Anonymous Auth - 匿名認証を確実に実行
+ * Register network state listener
  */
-async function ensureAnonymousAuth() {
+export function onNetworkStateChange(callback) {
+    networkListeners.push(callback);
+    callback(isOnline);
+    return () => {
+        networkListeners = networkListeners.filter(l => l !== callback);
+    };
+}
+
+/**
+ * Anonymous Auth - 匿名認証を確実に実行（リトライ付き）
+ */
+async function ensureAnonymousAuth(retries = 3) {
     if (!auth.currentUser) {
-        try {
-            await signInAnonymously(auth);
-            console.log('✅ Anonymous Auth Success');
-            console.log(`📋 Current user: ${auth.currentUser?.uid || 'none'}`);
-            return true;
-        } catch (error) {
-            console.error('❌ Anonymous Auth Failed', error);
-            throw new Error('認証に失敗しました。ネットワークを確認して再度お試しください。');
+        metrics.authAttempts++;
+        for (let attempt = 0; attempt < retries; attempt++) {
+            try {
+                const startTime = Date.now();
+                await signInAnonymously(auth);
+                const duration = Date.now() - startTime;
+                
+                metrics.authSuccess++;
+                console.log(`✅ Anonymous Auth Success (${duration}ms)`);
+                console.log(`📋 Current user: ${auth.currentUser?.uid || 'none'}`);
+                console.log(`🔐 Auth metrics: attempts=${metrics.authAttempts}, success=${metrics.authSuccess}, failures=${metrics.authFailures}`);
+                return true;
+            } catch (error) {
+                metrics.authFailures++;
+                console.error(`❌ Anonymous Auth Failed (attempt ${attempt + 1}/${retries}):`, error);
+                
+                if (attempt < retries - 1) {
+                    const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
+                    console.log(`⏳ Retrying auth in ${delay}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                } else {
+                    throw new Error('認証に失敗しました。ネットワークを確認して再度お試しください。');
+                }
+            }
         }
     }
     return true;
 }
 
+// --- Auth State Monitoring ---
+let authStateUnsubscribe = null;
+
 /**
- * Initialize Firebase with anonymous authentication
+ * Setup auth state monitoring with auto-reauthentication
  */
+function setupAuthStateMonitoring() {
+    if (authStateUnsubscribe) return;
+    
+    authStateUnsubscribe = onAuthStateChanged(auth, async (user) => {
+        if (user) {
+            console.log(`✅ Auth state: authenticated (${user.uid})`);
+        } else {
+            console.warn('⚠️ Auth state: unauthenticated - attempting reauth...');
+            try {
+                await ensureAnonymousAuth();
+            } catch (error) {
+                console.error('❌ Auto-reauth failed:', error);
+            }
+        }
+    }, (error) => {
+        console.error('❌ Auth state change error:', error);
+    });
+}
+
+/**
+ * Get performance metrics
+ */
+export function getMetrics() {
+    return {
+        ...metrics,
+        uptime: Date.now() - metrics.startTime,
+        isOnline
+    };
+}
 export async function initFirebase() {
     try {
+        console.log('🚀 Initializing Firebase...');
+        const startTime = Date.now();
+        
         // 匿名認証を確実に実行
         await ensureAnonymousAuth();
+        
+        // 認証状態監視を設定
+        setupAuthStateMonitoring();
+        
+        // ネットワーク状態を確認
+        if (!isOnline) {
+            console.warn('⚠️ Initializing in offline mode');
+        }
+        
+        const duration = Date.now() - startTime;
+        console.log(`✅ Firebase initialization complete (${duration}ms)`);
+        console.log(`📊 Initial metrics:`, getMetrics());
+        
         return Promise.resolve();
     } catch (error) {
         console.error('❌ Firebase initialization failed:', error);
@@ -45,53 +148,113 @@ export async function initFirebase() {
 }
 
 /**
- * Creates a new video processing job document in Firestore.
+ * Creates a new video processing job document in Firestore with retry logic.
  * @param {string} userId - The user's ID.
  * @param {string} fileName - The name of the video file.
  * @returns {Promise<string>} - The unique ID of the created job.
  */
-async function createVideoJob(userId, fileName) {
-    try {
-        // 認証状態を確認
-        if (!auth.currentUser) {
-            console.error('❌ Not authenticated when creating job');
-            throw new Error('認証が必要です。ページを再読み込みしてお試しください。');
-        }
+async function createVideoJob(userId, fileName, retries = 3) {
+    metrics.firestoreOps++;
+    
+    for (let attempt = 0; attempt < retries; attempt++) {
+        try {
+            // 認証状態を確認・再認証
+            if (!auth.currentUser) {
+                console.warn(`⚠️ Not authenticated (attempt ${attempt + 1}/${retries}) - reauthenticating...`);
+                await ensureAnonymousAuth();
+            }
 
-        const firebaseUid = auth.currentUser.uid;
-        console.log(`📝 Creating job - Firebase UID: ${firebaseUid}, LIFF User ID: ${userId}`);
-        
-        const jobsCollection = collection(firestore, 'video_jobs');
-        const docRef = await addDoc(jobsCollection, {
-            userId: userId, // LIFF User ID
-            firebaseUid: firebaseUid, // Firebase UID
-            originalFileName: fileName,
-            status: 'pending', // pending -> processing -> completed / error
-            createdAt: serverTimestamp(),
-            retries: 0,
-        });
-        console.log(`✅ Job created in Firestore with ID: ${docRef.id}`);
-        return docRef.id;
-    } catch (error) {
-        console.error('❌ Failed to create Firestore job', error);
-        console.error('Error details:', {
-            code: error.code,
-            message: error.message,
-            name: error.name,
-            stack: error.stack
-        });
-        
-        // より詳細なエラーメッセージ
-        if (error.code === 'permission-denied') {
-            throw new Error("解析ジョブの作成権限がありません。匿名認証を確認してください。");
-        } else if (error.code === 'unavailable') {
-            throw new Error("Firestoreサービスが利用できません。ネットワークを確認してください。");
-        } else if (error.message.includes('認証')) {
-            throw error; // 認証エラーはそのまま伝播
-        } else {
-            throw new Error(`解析ジョブの作成に失敗しました: ${error.message || '不明なエラー'}`);
+            if (!auth.currentUser) {
+                throw new Error('認証が必要です。ページを再読み込みしてお試しください。');
+            }
+
+            const firebaseUid = auth.currentUser.uid;
+            const startTime = Date.now();
+            
+            console.log(`📝 Creating job (attempt ${attempt + 1}/${retries}) - Firebase UID: ${firebaseUid}, LIFF User ID: ${userId}`);
+            
+            // ネットワーク状態を確認
+            if (!isOnline) {
+                throw new Error('オフライン状態です。ネットワーク接続を確認してください。');
+            }
+            
+            const jobsCollection = collection(firestore, 'video_jobs');
+            const docRef = await Promise.race([
+                addDoc(jobsCollection, {
+                    userId: userId, // LIFF User ID
+                    firebaseUid: firebaseUid, // Firebase UID
+                    originalFileName: fileName,
+                    status: 'pending', // pending -> processing -> completed / error
+                    createdAt: serverTimestamp(),
+                    retries: 0,
+                }),
+                new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Firestore接続タイムアウト')), 30000)
+                )
+            ]);
+            
+            const duration = Date.now() - startTime;
+            console.log(`✅ Job created in Firestore with ID: ${docRef.id} (${duration}ms)`);
+            return docRef.id;
+            
+        } catch (error) {
+            console.error(`❌ Failed to create Firestore job (attempt ${attempt + 1}/${retries}):`, error);
+            console.error('Error details:', {
+                code: error.code,
+                message: error.message,
+                name: error.name,
+                isOnline,
+                hasAuth: !!auth.currentUser
+            });
+            
+            // リトライ可能なエラーの場合
+            if (attempt < retries - 1) {
+                const isRetryableError = 
+                    error.code === 'unavailable' ||
+                    error.code === 'deadline-exceeded' ||
+                    error.message.includes('タイムアウト') ||
+                    error.message.includes('ネットワーク');
+                
+                if (isRetryableError) {
+                    const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
+                    console.log(`⏳ Retrying Firestore operation in ${delay}ms...`);
+                    
+                    // ネットワークがオフラインの場合は待機
+                    if (!isOnline) {
+                        await new Promise((resolve) => {
+                            const unsubscribe = onNetworkStateChange((online) => {
+                                if (online) {
+                                    unsubscribe();
+                                    resolve();
+                                }
+                            });
+                            // 最大10秒待機
+                            setTimeout(() => {
+                                unsubscribe();
+                                resolve();
+                            }, 10000);
+                        });
+                    }
+                    
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
+            }
+            
+            // リトライ不能または最終試行失敗
+            if (error.code === 'permission-denied') {
+                throw new Error("解析ジョブの作成権限がありません。匿名認証を確認してください。");
+            } else if (error.code === 'unavailable' || error.message.includes('タイムアウト')) {
+                throw new Error("Firestoreサービスが利用できません。ネットワークを確認してください。");
+            } else if (error.message.includes('認証')) {
+                throw error; // 認証エラーはそのまま伝播
+            } else {
+                throw new Error(`解析ジョブの作成に失敗しました: ${error.message || '不明なエラー'}`);
+            }
         }
     }
+    
+    throw new Error('解析ジョブの作成に失敗しました（リトライ上限に達しました）');
 }
 
 /**
@@ -145,12 +308,17 @@ export async function uploadVideoToStorage(videoFile, userId, progressCallback) 
     console.log(`📋 LIFF User ID: ${userId}`);
     console.log(`📋 Auth provider: ${auth.currentUser?.providerData?.[0]?.providerId || 'anonymous'}`);
 
-    // 3. Execute the upload.
+    // 3. Execute the upload with enhanced progress tracking.
+    metrics.storageOps++;
     const uploadTask = uploadBytesResumable(storageRef, videoFile);
+    
+    const uploadStartTime = Date.now();
+    let lastProgressTime = Date.now();
+    let lastBytesTransferred = 0;
 
     return new Promise((resolve, reject) => {
-        // タイムアウト設定（5分）
-        const timeoutId = setTimeout(() => {
+        // タイムアウト設定（5分、ただし進行中は延長）
+        let timeoutId = setTimeout(() => {
             uploadTask.cancel();
             reject(new Error('アップロードがタイムアウトしました。ネットワークを確認して再度お試しください。'));
         }, 5 * 60 * 1000);
@@ -158,10 +326,45 @@ export async function uploadVideoToStorage(videoFile, userId, progressCallback) 
         uploadTask.on(
             'state_changed',
             (snapshot) => {
+                const now = Date.now();
                 const progress = snapshot.totalBytes > 0
                     ? (snapshot.bytesTransferred / snapshot.totalBytes) * 100
                     : 0;
-                if (progressCallback) progressCallback(progress);
+                
+                // タイムアウトをリセット（進行中の場合）
+                if (progress > 0) {
+                    clearTimeout(timeoutId);
+                    timeoutId = setTimeout(() => {
+                        uploadTask.cancel();
+                        reject(new Error('アップロードがタイムアウトしました。ネットワークを確認して再度お試しください。'));
+                    }, 5 * 60 * 1000);
+                }
+                
+                // 速度計算
+                const timeDelta = (now - lastProgressTime) / 1000; // 秒
+                const bytesDelta = snapshot.bytesTransferred - lastBytesTransferred;
+                const speed = timeDelta > 0 ? bytesDelta / timeDelta : 0; // bytes/sec
+                const remainingBytes = snapshot.totalBytes - snapshot.bytesTransferred;
+                const estimatedTimeRemaining = speed > 0 ? remainingBytes / speed : 0;
+                
+                // 詳細な進捗情報をログ出力（10%刻み）
+                if (Math.floor(progress) % 10 === 0 && progress > 0) {
+                    console.log(`📊 Upload progress: ${Math.round(progress)}% | Speed: ${(speed / 1024 / 1024).toFixed(2)}MB/s | ETA: ${Math.round(estimatedTimeRemaining)}s`);
+                }
+                
+                lastProgressTime = now;
+                lastBytesTransferred = snapshot.bytesTransferred;
+                
+                // 拡張された進捗コールバック（詳細情報を含む）
+                if (progressCallback) {
+                    progressCallback(progress, {
+                        bytesTransferred: snapshot.bytesTransferred,
+                        totalBytes: snapshot.totalBytes,
+                        speed: speed,
+                        estimatedTimeRemaining: estimatedTimeRemaining,
+                        elapsedTime: (now - uploadStartTime) / 1000
+                    });
+                }
             },
             (error) => {
                 clearTimeout(timeoutId);
@@ -188,11 +391,19 @@ export async function uploadVideoToStorage(videoFile, userId, progressCallback) 
             },
             async () => {
                 clearTimeout(timeoutId);
+                const duration = Date.now() - uploadStartTime;
+                const fileSizeMB = (videoFile.size / 1024 / 1024).toFixed(2);
+                const avgSpeed = (videoFile.size / (duration / 1000) / 1024 / 1024).toFixed(2);
+                
                 console.log(`✅ Upload complete for job ${jobId}`);
+                console.log(`📊 Upload metrics: ${fileSizeMB}MB in ${(duration / 1000).toFixed(1)}s (avg ${avgSpeed}MB/s)`);
+                console.log(`📊 Total metrics:`, getMetrics());
+                
                 // Here you could update the Firestore job status to 'uploaded'
                 resolve();
             }
         );
     });
 }
+
 

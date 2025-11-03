@@ -3,7 +3,7 @@
 
 import liff from '@line/liff';
 import { LIFF_CONFIG } from './config.js';
-import { uploadVideoToStorage, initFirebase } from './firebase.js';
+import { uploadVideoToStorage, initFirebase, getMetrics, onNetworkStateChange } from './firebase.js';
 
 // --- State Management & Constants ---
 
@@ -79,6 +79,13 @@ function createUploadView() {
   `;
 }
 
+function getProgressStatusText(progress, details) {
+  if (progress < 30) return '準備中...';
+  if (progress < 70) return 'アップロード中...';
+  if (progress < 95) return 'ほぼ完了...';
+  return '最終処理中...';
+}
+
 function createFeedbackView(override = {}) {
   const defaults = {
     processing: { icon: '💭', message: TSUN_MESSAGES.processing, subMessage: '解析中よ…', type: 'processing' },
@@ -86,7 +93,7 @@ function createFeedbackView(override = {}) {
   };
   
   const stateDefaults = defaults[appState.uiState] || {};
-  const { icon, message, subMessage, type, progress } = { ...stateDefaults, ...override };
+  const { icon, message, subMessage, type, progress, details } = { ...stateDefaults, ...override };
 
   const progressHtml = typeof progress === 'number' ? `
     <div class="progress-section">
@@ -94,7 +101,13 @@ function createFeedbackView(override = {}) {
       <div class="progress-bar-container">
         <div class="progress-bar" style="width: ${progress}%;"></div>
       </div>
-      <div class="progress-status">${progress < 30 ? '準備中...' : progress < 70 ? 'アップロード中...' : progress < 95 ? 'ほぼ完了...' : '最終処理中...'}</div>
+      <div class="progress-status">${getProgressStatusText(progress, override.details)}</div>
+      ${override.details ? `
+        <div class="progress-details">
+          ${override.details.speed ? `<span>速度: ${(override.details.speed / 1024 / 1024).toFixed(2)}MB/s</span>` : ''}
+          ${override.details.estimatedTimeRemaining ? `<span>残り: ${Math.round(override.details.estimatedTimeRemaining)}秒</span>` : ''}
+        </div>
+      ` : ''}
     </div>
   ` : '';
 
@@ -219,15 +232,25 @@ async function handleUpload() {
   setState({ uiState: 'uploading' });
 
   try {
-    const onProgress = (progress) => {
+    const onProgress = (progress, details) => {
       const message = TSUN_MESSAGES.uploading(Math.round(progress));
       const app = document.getElementById('app');
       if (app) {
-        app.innerHTML = createFeedbackView({ icon: '💭', message, type: 'processing', progress });
+        app.innerHTML = createFeedbackView({ 
+          icon: '💭', 
+          message, 
+          type: 'processing', 
+          progress,
+          details: details || {}
+        });
       }
     };
 
     await uploadVideoToStorage(appState.selectedFile, appState.profile.userId, onProgress);
+    
+    // 成功メトリクスをログ出力
+    const metrics = getMetrics();
+    console.log('📊 Final metrics:', metrics);
     
     setState({ uiState: 'success' });
 
@@ -236,7 +259,14 @@ async function handleUpload() {
 
   } catch (error) {
     console.error('Upload failed:', error);
-    handleError(error.message);
+    console.error('Metrics at failure:', getMetrics());
+    
+    // ネットワークエラーの場合は自動リトライを提案
+    if (error.message.includes('ネットワーク') || error.message.includes('タイムアウト')) {
+      handleError(error.message + '\n\n（ネットワーク接続を確認して、もう一度お試しください）');
+    } else {
+      handleError(error.message);
+    }
   }
 }
 
@@ -250,6 +280,19 @@ function handleError(message) {
 
 async function main() {
   renderUI(); // Show "initializing" message
+  
+  // ネットワーク状態監視を設定
+  onNetworkStateChange((isOnline) => {
+    if (!isOnline) {
+      console.warn('⚠️ Network offline detected');
+      if (appState.uiState === 'uploading') {
+        handleError('ネットワーク接続が切断されました。接続を確認してください。');
+      }
+    } else {
+      console.log('✅ Network online detected');
+    }
+  });
+  
   try {
     // 1. Firebaseを初期化（匿名認証）
     await initFirebase();
@@ -259,8 +302,14 @@ async function main() {
     appState.profile = profile;
     
     setState({ uiState: 'idle' });
+    
+    // 初期化完了メトリクス
+    const metrics = getMetrics();
+    console.log('📊 App initialized successfully:', metrics);
+    
   } catch (error) {
     console.error('Initialization failed:', error);
+    console.error('Metrics at failure:', getMetrics());
     handleError(error.message || TSUN_MESSAGES.liffError);
   }
 }

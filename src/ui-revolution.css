@@ -331,13 +331,20 @@ body::after {
   }
 }
 
-@keyframes progress-glow {
-  0%, 100% {
-    box-shadow: 0 0 15px rgba(255, 107, 157, 0.6);
-  }
-  50% {
-    box-shadow: 0 0 25px rgba(255, 107, 157, 0.9);
-  }
+.progress-details {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-top: 0.5rem;
+  opacity: 0.8;
+}
+
+.progress-details span {
+  padding: 0.25rem 0.5rem;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
 }
 
 /* レスポンシブ対応 */
