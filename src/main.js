@@ -26,7 +26,7 @@ const TSUN_MESSAGES = {
   
   // Errors
   fileTooBig: '…チッ、100MB以下の動画にしなさいよ。大きすぎて解析できないわ。',
-  fileTooLong: (duration) => `…長すぎるわよ！今の動画は${duration}秒じゃない。10秒以内に収めなさい。`,
+  fileTooLong: (duration) => `…長すぎるわよ！今の動画は${duration}秒じゃない。20秒以内に収めなさい。`,
   invalidFile: '…この動画、読めないわ。別のファイルを選びなさい。',
   defaultError: '…フン、何か問題が起きたみたいね。もう一度やりなさい。',
   liffError: 'このアプリはLINEの中でしか使えないの。分かった？',
@@ -111,7 +111,7 @@ function createErrorView() {
     subMessage: appState.errorMessage || TSUN_MESSAGES.defaultError,
     type: 'error'
   });
-}
+    }
 
 // --- Event Handling ---
 
@@ -161,7 +161,7 @@ async function handleFileSelect(event) {
     try {
       duration = await getVideoDuration(file);
       
-      if (duration > 10) {
+      if (duration > 20) {
         if (uploadBtn) {
           uploadBtn.disabled = false;
           uploadBtn.classList.remove('loading-state');
@@ -240,8 +240,8 @@ function handleError(message) {
   setState({ uiState: 'error', errorMessage: message });
   // Reset after a few seconds
   setTimeout(() => setState({ uiState: 'idle', errorMessage: '' }), 5000);
-}
-
+  }
+  
 // --- Initialization ---
 
 async function main() {
@@ -281,7 +281,7 @@ async function initLiff() {
       // This will redirect, so we wait indefinitely
       return new Promise(() => {}); 
     }
-
+    
     // プロファイル取得（リトライ付き、タイムアウト付き）
     let profile;
     let lastError;
@@ -298,7 +298,7 @@ async function initLiff() {
         if (profile && profile.userId) {
           console.log('✅ LIFF profile retrieved:', profile.userId);
           return profile;
-        }
+    }
       } catch (error) {
         console.warn(`⚠️ LIFF profile attempt ${attempt + 1} failed:`, error);
         lastError = error;
@@ -306,7 +306,7 @@ async function initLiff() {
         // リトライ前に少し待機（指数バックオフ）
         if (attempt < 2) {
           await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
-        }
+              }
       }
     }
     
@@ -325,8 +325,8 @@ async function initLiff() {
       throw new Error('LIFF初期化に失敗しました。LINEアプリ内で開いていることを確認してください。');
     }
   }
-}
-
+          }
+          
 // --- Utility Functions ---
 
 function setState(newState) {
@@ -344,11 +344,12 @@ function getVideoDuration(file) {
     let timeoutId;
     let objectURL;
     
-    // 30秒タイムアウト（モバイルでのメタデータ読み込み遅延に対応）
+    // 60秒タイムアウト（モバイルでのメタデータ読み込み遅延に対応）
     timeoutId = setTimeout(() => {
+      console.warn('⏱️ Video metadata loading timeout after 60s');
       cleanup();
       reject(new Error('動画の読み込みがタイムアウトしました。ネットワーク環境を確認してください。'));
-    }, 30000);
+    }, 60000);
     
     const cleanup = () => {
       clearTimeout(timeoutId);
@@ -361,9 +362,11 @@ function getVideoDuration(file) {
     
     video.onloadedmetadata = () => {
       const duration = video.duration;
+      console.log(`✅ Video duration loaded: ${duration}s`);
       cleanup();
       
       if (isNaN(duration) || duration <= 0) {
+        console.error('❌ Invalid video duration:', duration);
         reject(new Error('動画の長さを取得できませんでした。'));
         return;
       }
@@ -372,19 +375,22 @@ function getVideoDuration(file) {
     };
     
     video.onerror = (e) => {
+      console.error('❌ Video loading error:', e);
       cleanup();
       reject(new Error('動画ファイルを読み込めませんでした。ファイル形式を確認してください。'));
     };
     
     // メタデータ読み込みを開始
     try {
+      console.log(`📹 Loading video metadata for file: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)}MB)`);
       objectURL = window.URL.createObjectURL(file);
       video.src = objectURL;
       video.load(); // 明示的に読み込み開始
     } catch (error) {
+      console.error('❌ Error creating object URL:', error);
       cleanup();
       reject(new Error('動画ファイルの処理中にエラーが発生しました。'));
-    }
+  }
   });
 }
 

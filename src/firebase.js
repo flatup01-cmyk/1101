@@ -38,19 +38,44 @@ if (import.meta.env.DEV) {
  */
 async function createVideoJob(userId, fileName) {
     try {
+        console.log(`📝 Creating job for user: ${userId}, file: ${fileName}`);
+        
+        // タイムアウト付きでFirestoreジョブを作成（モバイル環境対応）
         const jobsCollection = collection(firestore, 'video_jobs');
-        const docRef = await addDoc(jobsCollection, {
+        const createPromise = addDoc(jobsCollection, {
             userId: userId,
             originalFileName: fileName,
             status: 'pending', // pending -> processing -> completed / error
             createdAt: serverTimestamp(),
             retries: 0,
         });
+        
+        // 30秒タイムアウト
+        const docRef = await Promise.race([
+            createPromise,
+            new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Firestore接続タイムアウト')), 30000)
+            )
+        ]);
+        
         console.log(`✅ Job created in Firestore with ID: ${docRef.id}`);
         return docRef.id;
     } catch (error) {
-        console.error('❌ Failed to create Firestore job', error);
-        throw new Error("解析ジョブの作成に失敗しました。やり直してください。");
+        console.error('❌ Failed to create Firestore job:', error);
+        console.error('Error details:', {
+            code: error.code,
+            message: error.message,
+            name: error.name
+        });
+        
+        // より詳細なエラーメッセージ
+        if (error.message.includes('タイムアウト')) {
+            throw new Error("解析ジョブの作成がタイムアウトしました。ネットワークを確認して、もう一度お試しください。");
+        } else if (error.code === 'permission-denied') {
+            throw new Error("解析ジョブの作成権限がありません。LINEアプリでログインし直してください。");
+        } else {
+            throw new Error("解析ジョブの作成に失敗しました。やり直してください。");
+        }
     }
 }
 
@@ -63,11 +88,20 @@ async function createVideoJob(userId, fileName) {
  */
 export async function uploadVideoToStorage(videoFile, userId, progressCallback) {
     if (!userId || !/^[a-zA-Z0-9_-]+$/.test(userId)) {
+        console.error('❌ Invalid userId:', userId);
         throw new Error('不正なユーザーIDです。');
     }
 
+    console.log(`📤 Upload request - User: ${userId}, File: ${videoFile.name}, Size: ${(videoFile.size / 1024 / 1024).toFixed(2)}MB`);
+
     // 1. Create a job document in Firestore first.
-    const jobId = await createVideoJob(userId, videoFile.name);
+    let jobId;
+    try {
+        jobId = await createVideoJob(userId, videoFile.name);
+    } catch (error) {
+        console.error('❌ Job creation failed:', error);
+        throw error; // エラーをそのまま伝播
+    }
 
     // 2. Define the storage path using the job ID for integrity.
     const storagePath = `videos/${userId}/${jobId}/${videoFile.name}`;
@@ -79,18 +113,47 @@ export async function uploadVideoToStorage(videoFile, userId, progressCallback) 
     const uploadTask = uploadBytesResumable(storageRef, videoFile);
 
     return new Promise((resolve, reject) => {
+        let lastProgress = 0;
+        
         uploadTask.on(
             'state_changed',
             (snapshot) => {
                 const progress = snapshot.totalBytes > 0
                     ? (snapshot.bytesTransferred / snapshot.totalBytes) * 100
                     : 0;
+                
+                // 進捗ログ（10%刻みで）
+                if (Math.floor(progress / 10) > Math.floor(lastProgress / 10)) {
+                    console.log(`📊 Upload progress: ${Math.floor(progress)}%`);
+                    lastProgress = progress;
+                }
+                
                 if (progressCallback) progressCallback(progress);
             },
             (error) => {
                 console.error(`❌ Upload failed for job ${jobId}:`, error);
-                // Here you could add logic to update the Firestore job status to 'error'
-                reject(new Error("動画のアップロードに失敗しました。ネットワークを確認してやり直してください。"));
+                console.error('Upload error details:', {
+                    code: error.code,
+                    message: error.message,
+                    serverResponse: error.serverResponse
+                });
+                
+                // より詳細なエラーメッセージ
+                let errorMessage = "動画のアップロードに失敗しました。";
+                
+                if (error.code === 'storage/unauthorized') {
+                    errorMessage = "アップロード権限がありません。LINEアプリでログインし直してください。";
+                } else if (error.code === 'storage/canceled') {
+                    errorMessage = "アップロードがキャンセルされました。";
+                } else if (error.code === 'storage/quota-exceeded') {
+                    errorMessage = "ストレージの容量が不足しています。";
+                } else if (error.code === 'storage/retry-limit-exceeded') {
+                    errorMessage = "アップロードのリトライ回数を超えました。ネットワークを確認してください。";
+                } else {
+                    errorMessage = "動画のアップロードに失敗しました。ネットワークを確認してやり直してください。";
+                }
+                
+                reject(new Error(errorMessage));
             },
             async () => {
                 console.log(`✅ Upload complete for job ${jobId}`);

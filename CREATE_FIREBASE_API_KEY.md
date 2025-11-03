@@ -138,3 +138,6 @@ VITE_FIREBASE_API_KEY=AIzaSyDDy5_-jv0BQCCFIHyPgXvH7sBjE83mnp4
 **状態:** ⚠️ APIキー作成が必要
 
 
+1
+
+

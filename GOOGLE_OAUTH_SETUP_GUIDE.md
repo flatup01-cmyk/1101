@@ -69,7 +69,21 @@ External を選択（一般公開の場合）
    Make.com Integration
    ```
 
-5. **Authorized redirect URIs（認可済みリダイレクトURI）** ⚠️ 完全一致で3つ追加
+5. **Authorized JavaScript origins（JavaScriptオリジン）** ⚠️ オプション、ドメインのみ
+   
+   **設定値**（パスなし、スラッシュなし）:
+   ```
+   https://www.make.com
+   https://us2.make.com
+   https://eu1.make.com
+   ```
+   
+   **⚠️ 注意**: 
+   - パス（`/oauth/cb`）は含めない
+   - 末尾スラッシュ（`/`）も含めない
+   - ドメインのみ
+
+6. **Authorized redirect URIs（認可済みリダイレクトURI）** ⚠️ 必須、完全一致で3つ追加
    ```
    https://www.make.com/oauth/cb
    https://us2.make.com/oauth/cb
