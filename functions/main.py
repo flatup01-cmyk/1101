@@ -322,20 +322,38 @@ def process_video(data, context):
         logger.error(f"セキュリティ: 不正なパス: {file_path}")
         return {"status": "error", "reason": "invalid path"}
     
-    # ファイルパスからユーザーIDとjobIdを抽出
-    # パス構造: videos/{userId}/{jobId}/{fileName}
+    # ファイルパスからfirebaseUidとjobIdを抽出
+    # パス構造: videos/{firebaseUid}/{jobId}/{fileName}
     path_parts = file_path.split('/')
     if len(path_parts) < 4:
         logger.error(f"セキュリティ: パス構造が不正: {file_path}")
         return {"status": "error", "reason": "invalid path structure"}
     
-    user_id = path_parts[1]
+    firebase_uid = path_parts[1]  # Firebase UID
     job_id = path_parts[2] if len(path_parts) >= 3 else None
     
-    # ユーザーIDの検証
-    if not user_id or not user_id.replace('-', '').replace('_', '').isalnum():
-        logger.error(f"セキュリティ: 不正なユーザーID: {user_id}")
-        return {"status": "error", "reason": "invalid user id"}
+    # Firebase UIDの検証
+    if not firebase_uid or not firebase_uid.replace('-', '').replace('_', '').isalnum():
+        logger.error(f"セキュリティ: 不正なFirebase UID: {firebase_uid}")
+        return {"status": "error", "reason": "invalid firebase uid"}
+    
+    # FirestoreからLINEユーザーIDを取得（job_idが存在する場合）
+    line_user_id = None
+    if job_id:
+        try:
+            job_doc = db.collection('video_jobs').document(job_id).get()
+            if job_doc.exists:
+                job_data = job_doc.to_dict()
+                line_user_id = job_data.get('userId')  # LIFF User ID
+                logger.info(f"✅ FirestoreからLINE User IDを取得: {line_user_id}")
+        except Exception as e:
+            logger.warning(f"⚠️ FirestoreからLINE User ID取得エラー: {str(e)}")
+    
+    # LINEユーザーIDが取得できない場合は、firebase_uidをフォールバックとして使用
+    # ただし、LINE通知の場合はline_user_idが必要
+    user_id = line_user_id or firebase_uid
+    
+    logger.info(f"処理対象ユーザー: Firebase UID={firebase_uid}, LINE User ID={line_user_id or 'N/A'}")
     
     # レートリミットチェック
     is_allowed, rate_limit_message = check_rate_limit(user_id, 'upload_video')
@@ -520,11 +538,15 @@ def process_video(data, context):
             aika_message = "…別に、アンタの動画を解析してやってもいいけど？"
         
         # 5. LINE Messaging APIでユーザーに送信（指数関数的バックオフ・リトライ付き）
-        try:
-            send_line_message_with_retry(user_id, aika_message, unique_id)
-        except Exception as send_error:
-            logger.error(f"❌ LINE送信エラー（リトライ後も失敗）: {str(send_error)}")
-            # エラーが発生しても処理は継続（ログに記録済み）
+        # LINE通知にはline_user_idが必要（Firestoreから取得したLIFF User ID）
+        if line_user_id:
+            try:
+                send_line_message_with_retry(line_user_id, aika_message, unique_id)
+            except Exception as send_error:
+                logger.error(f"❌ LINE送信エラー（リトライ後も失敗）: {str(send_error)}")
+                # エラーが発生しても処理は継続（ログに記録済み）
+        else:
+            logger.warning(f"⚠️ LINE User IDが取得できなかったため、LINE通知をスキップします（Firebase UID: {firebase_uid}）")
         
         # 【データ整合性】Firestoreを更新（分析結果とステータス）
         processing_doc_ref.update({

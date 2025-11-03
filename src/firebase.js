@@ -1,8 +1,8 @@
 import { initializeApp } from 'firebase/app';
 import { getStorage, ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { getAuth, signInWithCustomToken } from 'firebase/auth';
+import { getAuth, signInAnonymously } from 'firebase/auth';
 import { getFirestore, collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { FIREBASE_CONFIG, CLOUD_FUNCTIONS_CONFIG } from './config.js';
+import { FIREBASE_CONFIG } from './config.js';
 
 // --- Firebase Initialization ---
 const app = initializeApp(FIREBASE_CONFIG);
@@ -13,64 +13,30 @@ const firestore = getFirestore(app);
 console.log('✅ Firebase Core Services Initialized');
 
 /**
- * LIFF IDトークンをFirebaseカスタムトークンに交換する
- * @param {string} liffIdToken - LIFFのIDトークン
- * @returns {Promise<string>} - Firebaseカスタムトークン
+ * Anonymous Auth - 匿名認証を確実に実行
  */
-async function exchangeLiffTokenForCustomToken(liffIdToken) {
-    try {
-        const response = await fetch(CLOUD_FUNCTIONS_CONFIG.exchangeTokenUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                idToken: liffIdToken
-            })
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+async function ensureAnonymousAuth() {
+    if (!auth.currentUser) {
+        try {
+            await signInAnonymously(auth);
+            console.log('✅ Anonymous Auth Success');
+            console.log(`📋 Current user: ${auth.currentUser?.uid || 'none'}`);
+            return true;
+        } catch (error) {
+            console.error('❌ Anonymous Auth Failed', error);
+            throw new Error('認証に失敗しました。ネットワークを確認して再度お試しください。');
         }
-
-        const data = await response.json();
-        return data.customToken;
-    } catch (error) {
-        console.error('❌ LIFFトークン交換エラー:', error);
-        throw new Error(`認証トークンの交換に失敗しました: ${error.message}`);
     }
+    return true;
 }
 
 /**
- * Initialize Firebase with LIFF authentication
- * @param {string} liffIdToken - LIFFのIDトークン
+ * Initialize Firebase with anonymous authentication
  */
-export async function initFirebase(liffIdToken) {
+export async function initFirebase() {
     try {
-        // 開発モードの場合は匿名認証を使用
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('dev') === 'true' || import.meta.env.DEV) {
-            console.log('🔧 Development mode: Using anonymous auth');
-            // 開発モードでは匿名認証をスキップ（Firebase Admin SDKがない場合の代替）
-            return Promise.resolve();
-        }
-
-        if (!liffIdToken) {
-            throw new Error('LIFF IDトークンが提供されていません');
-        }
-
-        // LIFF IDトークンをFirebaseカスタムトークンに交換
-        console.log('🔄 Exchanging LIFF token for Firebase custom token...');
-        const customToken = await exchangeLiffTokenForCustomToken(liffIdToken);
-        
-        // Firebaseカスタムトークンでサインイン
-        console.log('🔐 Signing in with custom token...');
-        await signInWithCustomToken(auth, customToken);
-        
-        console.log('✅ Firebase authentication successful');
-        console.log(`📋 Current user: ${auth.currentUser?.uid || 'none'}`);
-        
+        // 匿名認証を確実に実行
+        await ensureAnonymousAuth();
         return Promise.resolve();
     } catch (error) {
         console.error('❌ Firebase initialization failed:', error);
@@ -88,7 +54,8 @@ async function createVideoJob(userId, fileName) {
     try {
         const jobsCollection = collection(firestore, 'video_jobs');
         const docRef = await addDoc(jobsCollection, {
-            userId: userId,
+            userId: userId, // LIFF User ID
+            firebaseUid: auth.currentUser?.uid || null, // Firebase UID
             originalFileName: fileName,
             status: 'pending', // pending -> processing -> completed / error
             createdAt: serverTimestamp(),
@@ -114,9 +81,10 @@ export async function uploadVideoToStorage(videoFile, userId, progressCallback) 
         throw new Error('不正なユーザーIDです。');
     }
 
-    // 0. 認証を確認（未認証の場合はエラー）
+    // 0. 認証を確認（未認証の場合は認証を実行）
     if (!auth.currentUser) {
-        throw new Error('認証が必要です。ページを再読み込みしてお試しください。');
+        console.log('⚠️ 認証されていないため、匿名認証を実行します...');
+        await ensureAnonymousAuth();
     }
 
     // 1. Create a job document in Firestore first.
@@ -130,12 +98,15 @@ export async function uploadVideoToStorage(videoFile, userId, progressCallback) 
     }
 
     // 2. Define the storage path using the job ID for integrity.
-    const storagePath = `videos/${userId}/${jobId}/${videoFile.name}`;
+    // Firebase UIDを使用してパスを構築（Storage Rulesとの整合性を保つ）
+    const firebaseUid = auth.currentUser.uid;
+    const storagePath = `videos/${firebaseUid}/${jobId}/${videoFile.name}`;
     const storageRef = ref(storage, storagePath);
 
     console.log(`🚀 Starting upload for job ${jobId} to ${storagePath}`);
-    console.log(`📋 Current user: ${auth.currentUser?.uid || 'none'}`);
-    console.log(`📋 Auth provider: ${auth.currentUser?.providerData?.[0]?.providerId || 'none'}`);
+    console.log(`📋 Firebase UID: ${firebaseUid}`);
+    console.log(`📋 LIFF User ID: ${userId}`);
+    console.log(`📋 Auth provider: ${auth.currentUser?.providerData?.[0]?.providerId || 'anonymous'}`);
 
     // 3. Execute the upload.
     const uploadTask = uploadBytesResumable(storageRef, videoFile);

@@ -251,29 +251,12 @@ function handleError(message) {
 async function main() {
   renderUI(); // Show "initializing" message
   try {
-    // 1. LIFFを初期化してプロファイルを取得
+    // 1. Firebaseを初期化（匿名認証）
+    await initFirebase();
+    
+    // 2. LIFFを初期化してプロファイルを取得
     const profile = await initLiff();
     appState.profile = profile;
-    
-    // 2. LIFF IDトークンを取得
-    let liffIdToken;
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get('dev') === 'true' || import.meta.env.DEV) {
-      console.log('🔧 Development mode: Skipping LIFF token exchange');
-      // 開発モードではトークン交換をスキップ
-      await initFirebase(null);
-    } else {
-      // LIFF IDトークンを取得
-      if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
-        liffIdToken = await liff.getIDToken();
-        console.log('✅ LIFF ID token retrieved');
-        
-        // 3. Firebaseを初期化（LIFF IDトークンを使用）
-        await initFirebase(liffIdToken);
-      } else {
-        throw new Error('LIFFがログインしていません');
-      }
-    }
     
     setState({ uiState: 'idle' });
   } catch (error) {
