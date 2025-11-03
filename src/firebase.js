@@ -52,10 +52,19 @@ export async function initFirebase() {
  */
 async function createVideoJob(userId, fileName) {
     try {
+        // 認証状態を確認
+        if (!auth.currentUser) {
+            console.error('❌ Not authenticated when creating job');
+            throw new Error('認証が必要です。ページを再読み込みしてお試しください。');
+        }
+
+        const firebaseUid = auth.currentUser.uid;
+        console.log(`📝 Creating job - Firebase UID: ${firebaseUid}, LIFF User ID: ${userId}`);
+        
         const jobsCollection = collection(firestore, 'video_jobs');
         const docRef = await addDoc(jobsCollection, {
             userId: userId, // LIFF User ID
-            firebaseUid: auth.currentUser?.uid || null, // Firebase UID
+            firebaseUid: firebaseUid, // Firebase UID
             originalFileName: fileName,
             status: 'pending', // pending -> processing -> completed / error
             createdAt: serverTimestamp(),
@@ -65,7 +74,23 @@ async function createVideoJob(userId, fileName) {
         return docRef.id;
     } catch (error) {
         console.error('❌ Failed to create Firestore job', error);
-        throw new Error("解析ジョブの作成に失敗しました。やり直してください。");
+        console.error('Error details:', {
+            code: error.code,
+            message: error.message,
+            name: error.name,
+            stack: error.stack
+        });
+        
+        // より詳細なエラーメッセージ
+        if (error.code === 'permission-denied') {
+            throw new Error("解析ジョブの作成権限がありません。匿名認証を確認してください。");
+        } else if (error.code === 'unavailable') {
+            throw new Error("Firestoreサービスが利用できません。ネットワークを確認してください。");
+        } else if (error.message.includes('認証')) {
+            throw error; // 認証エラーはそのまま伝播
+        } else {
+            throw new Error(`解析ジョブの作成に失敗しました: ${error.message || '不明なエラー'}`);
+        }
     }
 }
 
@@ -78,13 +103,25 @@ async function createVideoJob(userId, fileName) {
  */
 export async function uploadVideoToStorage(videoFile, userId, progressCallback) {
     if (!userId || !/^[a-zA-Z0-9_-]+$/.test(userId)) {
+        console.error('❌ Invalid userId:', userId);
         throw new Error('不正なユーザーIDです。');
     }
 
     // 0. 認証を確認（未認証の場合は認証を実行）
     if (!auth.currentUser) {
         console.log('⚠️ 認証されていないため、匿名認証を実行します...');
-        await ensureAnonymousAuth();
+        try {
+            await ensureAnonymousAuth();
+        } catch (error) {
+            console.error('❌ Anonymous auth failed during upload:', error);
+            throw new Error('認証に失敗しました。ページを再読み込みしてお試しください。');
+        }
+    }
+
+    // 認証状態を再度確認
+    if (!auth.currentUser) {
+        console.error('❌ Still not authenticated after ensureAnonymousAuth');
+        throw new Error('認証に失敗しました。ページを再読み込みしてお試しください。');
     }
 
     // 1. Create a job document in Firestore first.

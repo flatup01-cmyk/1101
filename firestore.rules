@@ -4,16 +4,22 @@ service cloud.firestore {
   match /databases/{database}/documents {
     // video_jobsコレクションのルール
     match /video_jobs/{jobId} {
-      // 作成は認証済みユーザーのみ
+      // 作成は認証済みユーザーのみ（匿名認証も許可）
       allow create: if request.auth != null;
 
       // 読み取りはジョブの所有者のみ
-      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+      // 匿名認証の場合: firebaseUidでチェック
+      // その他の場合: userIdでチェック（後方互換性のため）
+      allow read: if request.auth != null 
+                  && (request.auth.uid == resource.data.firebaseUid 
+                      || request.auth.uid == resource.data.userId);
 
       // 更新はジョブの所有者のみ、かつ特定のフィールドのみ変更可能
+      // Cloud FunctionsはAdmin SDKを使用するため、Rulesをバイパスします
       allow update: if request.auth != null
-                      && request.auth.uid == resource.data.userId
-                      && request.resource.data.keys().hasOnly(['status', 'analysis_result', 'aika_message', 'notification_sent', 'completed_at', 'updated_at', 'retries', 'error_message']);
+                      && (request.auth.uid == resource.data.firebaseUid 
+                          || request.auth.uid == resource.data.userId)
+                      && request.resource.data.keys().hasOnly(['status', 'analysis_result', 'aika_message', 'notification_sent', 'completed_at', 'updated_at', 'retries', 'error_message', 'userId', 'firebaseUid', 'originalFileName', 'createdAt']);
 
       // 削除は拒否（ジョブは削除しない）
       allow delete: if false;
@@ -21,15 +27,23 @@ service cloud.firestore {
 
     // video_processingコレクションのルール（冪等性確保用）
     match /video_processing/{docId} {
-      // 作成は認証済みユーザーのみ
+      // 作成は認証済みユーザーのみ（匿名認証も許可）
       allow create: if request.auth != null;
 
       // 読み取りはジョブの所有者のみ
-      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+      // 匿名認証の場合: firebaseUidでチェック
+      // その他の場合: userIdでチェック（後方互換性のため）
+      allow read: if request.auth != null 
+                  && (request.auth.uid == resource.data.firebaseUid 
+                      || request.auth.uid == resource.data.userId 
+                      || request.auth.uid == resource.data.user_id);
 
       // 更新はジョブの所有者のみ、かつ特定のフィールドのみ変更可能
+      // Cloud FunctionsはAdmin SDKを使用するため、Rulesをバイパスします
       allow update: if request.auth != null
-                      && request.auth.uid == resource.data.userId
+                      && (request.auth.uid == resource.data.firebaseUid 
+                          || request.auth.uid == resource.data.userId 
+                          || request.auth.uid == resource.data.user_id)
                       && request.resource.data.keys().hasOnly(['status', 'file_path', 'user_id', 'started_at', 'updated_at', 'error_message']);
 
       // 削除は拒否
