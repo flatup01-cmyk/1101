@@ -49,6 +49,13 @@ export const SHEETS_CONFIG = {
   sheetId: import.meta.env.VITE_GOOGLE_SHEET_ID || '',
 }
 
+// Firebase Cloud Functions設定
+export const CLOUD_FUNCTIONS_CONFIG = {
+  // Cloud FunctionsのURL（デプロイ後に更新が必要）
+  exchangeTokenUrl: import.meta.env.VITE_CLOUD_FUNCTIONS_URL || 
+    'https://asia-northeast1-aikaapp-584fa.cloudfunctions.net/exchange_liff_token',
+}
+
 // 設定値の検証（開発環境のみ）
 if (import.meta.env.DEV) {
   console.log('環境変数読み込み状況:', {

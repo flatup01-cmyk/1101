@@ -24,7 +24,12 @@
 
 body {
   font-family: var(--font-main);
-  background: linear-gradient(135deg, var(--background-gradient-start) 0%, var(--background-gradient-end) 100%);
+  background-image: url('https://ik.imagekit.io/FLATUPGYM/b9d4a676-0903-444c-91d2-50222dc3294f.png?updatedAt=1760340781490'),
+                    linear-gradient(135deg, var(--background-gradient-start) 0%, var(--background-gradient-end) 100%);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
   min-height: 100vh;
   display: flex;
   align-items: center;
@@ -193,21 +198,98 @@ body {
 }
 
 /* --- Progress Bar --- */
+.progress-section {
+  width: 100%;
+  margin-top: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.progress-percentage {
+  font-size: 2.5rem;
+  font-weight: bold;
+  text-align: center;
+  color: var(--primary-brand-color);
+  text-shadow: 0 0 10px rgba(255, 107, 157, 0.5);
+  animation: pulse-percentage 1.5s ease-in-out infinite;
+  font-family: var(--font-mono);
+}
+
+.progress-status {
+  font-size: 0.85rem;
+  text-align: center;
+  color: var(--text-color);
+  opacity: 0.9;
+  font-family: var(--font-mono);
+}
+
 .progress-bar-container {
-  width: 80%;
-  height: 8px;
-  background-color: rgba(0, 0, 0, 0.3);
-  border-radius: 4px;
-  margin-top: 15px;
+  width: 100%;
+  height: 16px;
+  background-color: rgba(0, 0, 0, 0.4);
+  border-radius: 8px;
   overflow: hidden;
+  border: 2px solid rgba(255, 107, 157, 0.3);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+  position: relative;
 }
 
 .progress-bar {
   width: 0%;
   height: 100%;
   background: linear-gradient(90deg, var(--primary-brand-color) 0%, var(--accent-color) 100%);
-  border-radius: 4px;
+  border-radius: 8px;
   transition: width 0.3s ease-in-out;
+  box-shadow: 0 0 15px rgba(255, 107, 157, 0.6);
+  animation: progress-glow 1.5s ease-in-out infinite;
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.3) 50%,
+    transparent 100%
+  );
+  animation: progress-shine 2s ease-in-out infinite;
+}
+
+@keyframes pulse-percentage {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 0.9;
+  }
+}
+
+@keyframes progress-shine {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes progress-glow {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(255, 107, 157, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 25px rgba(255, 107, 157, 0.9);
+  }
 }
 
 /* --- Hidden file input --- */

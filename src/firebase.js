@@ -1,8 +1,8 @@
 import { initializeApp } from 'firebase/app';
 import { getStorage, ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { getAuth, signInAnonymously } from 'firebase/auth';
+import { getAuth, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { FIREBASE_CONFIG } from './config.js';
+import { FIREBASE_CONFIG, CLOUD_FUNCTIONS_CONFIG } from './config.js';
 
 // --- Firebase Initialization ---
 const app = initializeApp(FIREBASE_CONFIG);
@@ -13,20 +13,68 @@ const firestore = getFirestore(app);
 console.log('✅ Firebase Core Services Initialized');
 
 /**
- * Initialize Firebase (for compatibility)
+ * LIFF IDトークンをFirebaseカスタムトークンに交換する
+ * @param {string} liffIdToken - LIFFのIDトークン
+ * @returns {Promise<string>} - Firebaseカスタムトークン
  */
-export async function initFirebase() {
-    // Firebase is already initialized above
-    // This function exists for compatibility with main.js
-    return Promise.resolve();
+async function exchangeLiffTokenForCustomToken(liffIdToken) {
+    try {
+        const response = await fetch(CLOUD_FUNCTIONS_CONFIG.exchangeTokenUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                idToken: liffIdToken
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.customToken;
+    } catch (error) {
+        console.error('❌ LIFFトークン交換エラー:', error);
+        throw new Error(`認証トークンの交換に失敗しました: ${error.message}`);
+    }
 }
 
-// --- Anonymous Auth for Dev Mode ---
-if (import.meta.env.DEV) {
-    if (!auth.currentUser) {
-        signInAnonymously(auth)
-            .then(() => console.log('✅ Dev Mode: Anonymous Auth Success'))
-            .catch(error => console.error('❌ Dev Mode: Anonymous Auth Failed', error));
+/**
+ * Initialize Firebase with LIFF authentication
+ * @param {string} liffIdToken - LIFFのIDトークン
+ */
+export async function initFirebase(liffIdToken) {
+    try {
+        // 開発モードの場合は匿名認証を使用
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('dev') === 'true' || import.meta.env.DEV) {
+            console.log('🔧 Development mode: Using anonymous auth');
+            // 開発モードでは匿名認証をスキップ（Firebase Admin SDKがない場合の代替）
+            return Promise.resolve();
+        }
+
+        if (!liffIdToken) {
+            throw new Error('LIFF IDトークンが提供されていません');
+        }
+
+        // LIFF IDトークンをFirebaseカスタムトークンに交換
+        console.log('🔄 Exchanging LIFF token for Firebase custom token...');
+        const customToken = await exchangeLiffTokenForCustomToken(liffIdToken);
+        
+        // Firebaseカスタムトークンでサインイン
+        console.log('🔐 Signing in with custom token...');
+        await signInWithCustomToken(auth, customToken);
+        
+        console.log('✅ Firebase authentication successful');
+        console.log(`📋 Current user: ${auth.currentUser?.uid || 'none'}`);
+        
+        return Promise.resolve();
+    } catch (error) {
+        console.error('❌ Firebase initialization failed:', error);
+        throw error;
     }
 }
 
@@ -66,19 +114,39 @@ export async function uploadVideoToStorage(videoFile, userId, progressCallback) 
         throw new Error('不正なユーザーIDです。');
     }
 
+    // 0. 認証を確認（未認証の場合はエラー）
+    if (!auth.currentUser) {
+        throw new Error('認証が必要です。ページを再読み込みしてお試しください。');
+    }
+
     // 1. Create a job document in Firestore first.
-    const jobId = await createVideoJob(userId, videoFile.name);
+    let jobId;
+    try {
+        jobId = await createVideoJob(userId, videoFile.name);
+    } catch (error) {
+        console.error('❌ Firestore job creation failed:', error);
+        // エラーメッセージをそのまま伝播
+        throw error;
+    }
 
     // 2. Define the storage path using the job ID for integrity.
     const storagePath = `videos/${userId}/${jobId}/${videoFile.name}`;
     const storageRef = ref(storage, storagePath);
 
     console.log(`🚀 Starting upload for job ${jobId} to ${storagePath}`);
+    console.log(`📋 Current user: ${auth.currentUser?.uid || 'none'}`);
+    console.log(`📋 Auth provider: ${auth.currentUser?.providerData?.[0]?.providerId || 'none'}`);
 
     // 3. Execute the upload.
     const uploadTask = uploadBytesResumable(storageRef, videoFile);
 
     return new Promise((resolve, reject) => {
+        // タイムアウト設定（5分）
+        const timeoutId = setTimeout(() => {
+            uploadTask.cancel();
+            reject(new Error('アップロードがタイムアウトしました。ネットワークを確認して再度お試しください。'));
+        }, 5 * 60 * 1000);
+
         uploadTask.on(
             'state_changed',
             (snapshot) => {
@@ -88,11 +156,30 @@ export async function uploadVideoToStorage(videoFile, userId, progressCallback) 
                 if (progressCallback) progressCallback(progress);
             },
             (error) => {
+                clearTimeout(timeoutId);
                 console.error(`❌ Upload failed for job ${jobId}:`, error);
-                // Here you could add logic to update the Firestore job status to 'error'
-                reject(new Error("動画のアップロードに失敗しました。ネットワークを確認してやり直してください。"));
+                
+                // エラーの種類に応じてより具体的なメッセージを提供
+                let errorMessage = "動画のアップロードに失敗しました。";
+                
+                if (error.code === 'storage/unauthorized') {
+                    errorMessage = "認証エラーが発生しました。ページを再読み込みしてお試しください。";
+                } else if (error.code === 'storage/canceled') {
+                    errorMessage = "アップロードがキャンセルされました。";
+                } else if (error.code === 'storage/quota-exceeded') {
+                    errorMessage = "ストレージの容量が不足しています。";
+                } else if (error.code === 'storage/unauthenticated') {
+                    errorMessage = "認証が必要です。ページを再読み込みしてお試しください。";
+                } else if (error.code === 'storage/retry-limit-exceeded') {
+                    errorMessage = "ネットワークエラーが発生しました。ネットワークを確認して再度お試しください。";
+                } else {
+                    errorMessage = `アップロードに失敗しました: ${error.message}`;
+                }
+                
+                reject(new Error(errorMessage));
             },
             async () => {
+                clearTimeout(timeoutId);
                 console.log(`✅ Upload complete for job ${jobId}`);
                 // Here you could update the Firestore job status to 'uploaded'
                 resolve();

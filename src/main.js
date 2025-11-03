@@ -21,12 +21,12 @@ const TSUN_MESSAGES = {
 
   // Feedback Messages
   processing: 'ちょっと！今、必死に見てやってんだから静かに待ちなさい！',
-  uploading: (progress) => `…アップロード中よ (${progress}%)。焦らないで。`,
+  uploading: () => `…今、アップロードしてやってるのよ。`,
   success: '…まあ、動画は受け取ったわよ。結果はLINEで教えてあげる。せいぜい期待してなさいな。',
   
   // Errors
   fileTooBig: '…チッ、100MB以下の動画にしなさいよ。大きすぎて解析できないわ。',
-  fileTooLong: (duration) => `…長すぎるわよ！今の動画は${duration}秒じゃない。10秒以内に収めなさい。`,
+  fileTooLong: (duration) => `…長すぎるわよ！今の動画は${duration}秒じゃない。20秒以内に収めなさい。`,
   invalidFile: '…この動画、読めないわ。別のファイルを選びなさい。',
   defaultError: '…フン、何か問題が起きたみたいね。もう一度やりなさい。',
   liffError: 'このアプリはLINEの中でしか使えないの。分かった？',
@@ -89,8 +89,12 @@ function createFeedbackView(override = {}) {
   const { icon, message, subMessage, type, progress } = { ...stateDefaults, ...override };
 
   const progressHtml = typeof progress === 'number' ? `
-    <div class="progress-bar-container">
-      <div class="progress-bar" style="width: ${progress}%;"></div>
+    <div class="progress-section">
+      <div class="progress-percentage">${Math.round(progress)}%</div>
+      <div class="progress-bar-container">
+        <div class="progress-bar" style="width: ${progress}%;"></div>
+      </div>
+      <div class="progress-status">${progress < 30 ? '準備中...' : progress < 70 ? 'アップロード中...' : progress < 95 ? 'ほぼ完了...' : '最終処理中...'}</div>
     </div>
   ` : '';
 
@@ -111,7 +115,7 @@ function createErrorView() {
     subMessage: appState.errorMessage || TSUN_MESSAGES.defaultError,
     type: 'error'
   });
-}
+    }
 
 // --- Event Handling ---
 
@@ -161,7 +165,7 @@ async function handleFileSelect(event) {
     try {
       duration = await getVideoDuration(file);
       
-      if (duration > 10) {
+      if (duration > 20) {
         if (uploadBtn) {
           uploadBtn.disabled = false;
           uploadBtn.classList.remove('loading-state');
@@ -240,20 +244,41 @@ function handleError(message) {
   setState({ uiState: 'error', errorMessage: message });
   // Reset after a few seconds
   setTimeout(() => setState({ uiState: 'idle', errorMessage: '' }), 5000);
-}
-
+  }
+  
 // --- Initialization ---
 
 async function main() {
   renderUI(); // Show "initializing" message
   try {
-    await initFirebase();
+    // 1. LIFFを初期化してプロファイルを取得
     const profile = await initLiff();
     appState.profile = profile;
+    
+    // 2. LIFF IDトークンを取得
+    let liffIdToken;
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('dev') === 'true' || import.meta.env.DEV) {
+      console.log('🔧 Development mode: Skipping LIFF token exchange');
+      // 開発モードではトークン交換をスキップ
+      await initFirebase(null);
+    } else {
+      // LIFF IDトークンを取得
+      if (typeof liff !== 'undefined' && liff.isLoggedIn()) {
+        liffIdToken = await liff.getIDToken();
+        console.log('✅ LIFF ID token retrieved');
+        
+        // 3. Firebaseを初期化（LIFF IDトークンを使用）
+        await initFirebase(liffIdToken);
+      } else {
+        throw new Error('LIFFがログインしていません');
+      }
+    }
+    
     setState({ uiState: 'idle' });
   } catch (error) {
     console.error('Initialization failed:', error);
-    handleError(TSUN_MESSAGES.liffError);
+    handleError(error.message || TSUN_MESSAGES.liffError);
   }
 }
 
@@ -281,7 +306,7 @@ async function initLiff() {
       // This will redirect, so we wait indefinitely
       return new Promise(() => {}); 
     }
-
+    
     // プロファイル取得（リトライ付き、タイムアウト付き）
     let profile;
     let lastError;
@@ -298,7 +323,7 @@ async function initLiff() {
         if (profile && profile.userId) {
           console.log('✅ LIFF profile retrieved:', profile.userId);
           return profile;
-        }
+    }
       } catch (error) {
         console.warn(`⚠️ LIFF profile attempt ${attempt + 1} failed:`, error);
         lastError = error;
@@ -306,7 +331,7 @@ async function initLiff() {
         // リトライ前に少し待機（指数バックオフ）
         if (attempt < 2) {
           await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
-        }
+              }
       }
     }
     
@@ -325,8 +350,8 @@ async function initLiff() {
       throw new Error('LIFF初期化に失敗しました。LINEアプリ内で開いていることを確認してください。');
     }
   }
-}
-
+          }
+          
 // --- Utility Functions ---
 
 function setState(newState) {
@@ -384,7 +409,7 @@ function getVideoDuration(file) {
     } catch (error) {
       cleanup();
       reject(new Error('動画ファイルの処理中にエラーが発生しました。'));
-    }
+  }
   });
 }
 
