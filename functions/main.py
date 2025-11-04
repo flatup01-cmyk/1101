@@ -74,11 +74,12 @@ PROJECT_ID = os.environ.get('GCP_PROJECT', 'aikaapp-584fa')
 DIFY_API_ENDPOINT = os.environ.get('DIFY_API_ENDPOINT', 'https://api.dify.ai/v1/chat-messages')
 DIFY_API_KEY = os.environ.get('DIFY_API_KEY')
 
-# 環境変数の検証
+# 環境変数の検証（警告のみ、関数の実行は継続）
 if not DIFY_API_KEY:
-    logger.error("❌ CRITICAL: DIFY_API_KEY環境変数が設定されていません")
-    logger.error("Firebase Console → Functions → 環境変数で設定してください")
-    # 本番環境では環境変数が必須（ハードコードされたフォールバックは削除）
+    logger.warning("⚠️ WARNING: DIFY_API_KEY環境変数が設定されていません")
+    logger.warning("Firebase Console → Functions → 環境変数で設定してください")
+    logger.warning("Dify API連携は機能しませんが、動画解析は継続されます")
+    # 本番環境では環境変数が必須だが、関数の実行は継続（エラーで停止しない）
 
 
 # --- MCP連携関数 ---
@@ -582,23 +583,53 @@ if functions_framework:
         
         Storageにファイルが作成されると自動で呼ばれます
         """
-        logger.info(f"🔔 CloudEvent受信: {cloud_event['type']}")
-        logger.info(f"📦 CloudEventソース: {cloud_event.get('source', 'unknown')}")
-        
-        # Cloud Storage v2仕様のCloudEventデータ構造を処理
+        # CloudEventオブジェクトの属性を安全に取得（辞書形式とオブジェクト形式の両方に対応）
         try:
-            # CloudEventのdataフィールドからStorageオブジェクト情報を取得
-            event_data = cloud_event.get('data', {})
+            # タイプとソースを取得
+            event_type = cloud_event.get('type') if isinstance(cloud_event, dict) else getattr(cloud_event, 'type', 'unknown')
+            event_source = cloud_event.get('source') if isinstance(cloud_event, dict) else getattr(cloud_event, 'source', 'unknown')
             
-            # Cloud Storage v2仕様: dataフィールドに直接オブジェクト情報が含まれる
+            logger.info(f"🔔 CloudEvent受信: type={event_type}, source={event_source}")
+            
+            # CloudEventのdataフィールドを取得
+            event_data = cloud_event.get('data') if isinstance(cloud_event, dict) else getattr(cloud_event, 'data', None)
+            
+            # デバッグログ: 実際のデータ構造を確認
+            logger.info(f"📦 CloudEvent.dataの型: {type(event_data)}")
+            if event_data:
+                logger.info(f"📦 CloudEvent.dataの内容（最初の500文字）: {str(event_data)[:500]}")
+            
+            # Cloud Storage v2仕様のCloudEventデータ構造を処理
+            # パターン1: Base64エンコードされたJSON文字列（最も一般的）
+            if isinstance(event_data, str):
+                try:
+                    # Base64デコードを試行
+                    decoded_bytes = base64.b64decode(event_data)
+                    decoded_str = decoded_bytes.decode('utf-8')
+                    event_data = json.loads(decoded_str)
+                    logger.info("✅ Base64デコード成功")
+                except Exception as decode_error:
+                    # Base64デコードに失敗した場合、JSON文字列として直接パースを試行
+                    try:
+                        event_data = json.loads(event_data)
+                        logger.info("✅ JSON文字列として直接パース成功")
+                    except json.JSONDecodeError:
+                        logger.error(f"❌ CloudEventデータのデコードエラー: {decode_error}")
+                        logger.error(f"   データ（最初の500文字）: {event_data[:500] if len(event_data) > 500 else event_data}")
+                        return {"status": "error", "reason": "decode error", "details": str(decode_error)}
+            
+            # パターン2: 既に辞書形式
             if isinstance(event_data, dict):
                 # バケット名とファイル名を取得
                 bucket = event_data.get('bucket', '')
                 name = event_data.get('name', '')
                 
+                logger.info(f"📁 抽出されたデータ: bucket={bucket}, name={name}")
+                
                 if not bucket or not name:
                     logger.error(f"❌ CloudEventデータが不完全: bucket={bucket}, name={name}")
-                    return {"status": "error", "reason": "incomplete event data"}
+                    logger.error(f"   完全なevent_data: {json.dumps(event_data, ensure_ascii=False)}")
+                    return {"status": "error", "reason": "incomplete event data", "bucket": bucket, "name": name}
                 
                 # process_video関数に渡す形式に変換
                 video_data = {
@@ -607,23 +638,24 @@ if functions_framework:
                 }
                 
                 logger.info(f"📁 処理対象ファイル: {name} (バケット: {bucket})")
-                return process_video(video_data, None)
+                try:
+                    result = process_video(video_data, None)
+                    logger.info(f"✅ 処理完了: {json.dumps(result, ensure_ascii=False)}")
+                    return result
+                except Exception as process_error:
+                    logger.error(f"❌ process_video実行エラー: {process_error}")
+                    import traceback
+                    traceback.print_exc()
+                    return {"status": "error", "reason": "processing error", "details": str(process_error)}
             else:
-                # 文字列形式の場合（Base64デコードが必要な場合）
-                if isinstance(event_data, str):
-                    try:
-                        decoded_data = base64.b64decode(event_data).decode('utf-8')
-                        event_data = json.loads(decoded_data)
-                        return process_video(event_data, None)
-                    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as e:
-                        logger.error(f"❌ CloudEventデータのデコードエラー: {e}")
-                        return {"status": "error", "reason": "decode error"}
-                else:
-                    logger.error(f"❌ 予期しないCloudEventデータ形式: {type(event_data)}")
-                    return {"status": "error", "reason": "unexpected event data format"}
+                logger.error(f"❌ 予期しないCloudEventデータ形式: {type(event_data)}")
+                logger.error(f"   データ内容: {str(event_data)[:500]}")
+                return {"status": "error", "reason": "unexpected event data format", "type": str(type(event_data))}
                     
         except Exception as e:
             logger.error(f"❌ CloudEvent処理エラー: {e}")
+            logger.error(f"   CloudEvent型: {type(cloud_event)}")
+            logger.error(f"   CloudEvent内容: {str(cloud_event)[:500]}")
             import traceback
             traceback.print_exc()
             return {"status": "error", "reason": str(e)}
