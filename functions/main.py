@@ -289,7 +289,8 @@ def process_video(data, context):
                 return {"status": "error", "reason": "invalid data format"}
     
     file_path = data.get('name') or data.get('file')
-    bucket_name = data.get('bucket', os.environ.get('STORAGE_BUCKET', 'aikaapp-584fa.appspot.com'))
+    # Storageバケット名: Firebase Storageの新しい形式を優先
+    bucket_name = data.get('bucket', os.environ.get('STORAGE_BUCKET', 'aikaapp-584fa.firebasestorage.app'))
     
     logger.info(f"処理開始: {file_path} (bucket: {bucket_name})")
     
@@ -595,7 +596,7 @@ if functions_framework:
 if __name__ == '__main__':
     test_data = {
         'name': 'videos/test_user/1234567890-test.mp4',
-        'bucket': 'aikaapp-584fa.appspot.com'
+        'bucket': 'aikaapp-584fa.firebasestorage.app'
     }
     
     result = process_video(test_data, None)

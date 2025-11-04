@@ -82,11 +82,19 @@ function createUploadView() {
 function createFeedbackView(override = {}) {
   const defaults = {
     processing: { icon: '💭', message: TSUN_MESSAGES.processing, subMessage: '解析中よ…', type: 'processing' },
+    uploading: { icon: '💭', message: TSUN_MESSAGES.processing, subMessage: 'アップロード中よ…', type: 'processing' },
     success: { icon: '✨', message: TSUN_MESSAGES.success, subMessage: '…別に、アンタのために頑張ったわけじゃないんだからね。', type: 'success' },
+    error: { icon: '💢', message: '…チッ、エラーよ。', subMessage: TSUN_MESSAGES.defaultError, type: 'error' },
   };
   
-  const stateDefaults = defaults[appState.uiState] || {};
+  const stateDefaults = defaults[appState.uiState] || defaults.processing;
   const { icon, message, subMessage, type, progress } = { ...stateDefaults, ...override };
+  
+  // undefinedチェック: すべての値が存在することを確認
+  const finalIcon = icon || '💭';
+  const finalMessage = message || TSUN_MESSAGES.processing;
+  const finalSubMessage = subMessage || '';
+  const finalType = type || 'processing';
 
   const progressHtml = typeof progress === 'number' ? `
     <div class="progress-bar-container">
@@ -95,10 +103,10 @@ function createFeedbackView(override = {}) {
   ` : '';
 
   return `
-    <div class="feedback-container ${type}">
-      <div class="icon">${icon}</div>
-      <div class="message">${message}</div>
-      ${subMessage ? `<div class="sub-message">${subMessage}</div>` : ''}
+    <div class="feedback-container ${finalType}">
+      <div class="icon">${finalIcon}</div>
+      <div class="message">${finalMessage}</div>
+      ${finalSubMessage ? `<div class="sub-message">${finalSubMessage}</div>` : ''}
       ${progressHtml}
     </div>
   `;
@@ -245,15 +253,30 @@ function handleError(message) {
 // --- Initialization ---
 
 async function main() {
-  renderUI(); // Show "initializing" message
+  // 最初にUIをレンダリングして初期化メッセージを表示
+  renderUI();
+  
   try {
+    console.log('🚀 アプリケーション初期化開始...');
+    
+    // Firebase初期化
     await initFirebase();
+    console.log('✅ Firebase初期化完了');
+    
+    // LIFF初期化
     const profile = await initLiff();
-    appState.profile = profile;
-    setState({ uiState: 'idle' });
+    console.log('✅ LIFF初期化完了:', profile?.userId);
+    
+    if (profile && profile.userId) {
+      appState.profile = profile;
+      setState({ uiState: 'idle' });
+    } else {
+      console.error('❌ プロファイルが取得できませんでした');
+      handleError('ユーザー情報の取得に失敗しました。LINEアプリ内でページを再読み込みしてください。');
+    }
   } catch (error) {
-    console.error('Initialization failed:', error);
-    handleError(TSUN_MESSAGES.liffError);
+    console.error('❌ 初期化失敗:', error);
+    handleError(error.message || TSUN_MESSAGES.liffError);
   }
 }
 
