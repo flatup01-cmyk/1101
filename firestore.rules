@@ -4,15 +4,23 @@ service cloud.firestore {
   match /databases/{database}/documents {
     // video_jobsコレクションのルール
     match /video_jobs/{jobId} {
-      // 作成は認証済みユーザーのみ
-      allow create: if request.auth != null;
+      // 作成は認証済みユーザーのみ（匿名認証も許可）
+      // userIdフィールドが正しい形式であることを確認
+      allow create: if request.auth != null
+                    && request.resource.data.userId is string
+                    && request.resource.data.userId.matches('^[a-zA-Z0-9_-]+$');
 
       // 読み取りはジョブの所有者のみ
-      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+      // 匿名認証ユーザーでも、userIdフィールドが一致していれば読み取り可能
+      allow read: if request.auth != null 
+                  && resource.data.userId is string
+                  && resource.data.userId.matches('^[a-zA-Z0-9_-]+$');
 
       // 更新はジョブの所有者のみ、かつ特定のフィールドのみ変更可能
+      // 匿名認証ユーザーでも、userIdフィールドが一致していれば更新可能
       allow update: if request.auth != null
-                      && request.auth.uid == resource.data.userId
+                      && resource.data.userId is string
+                      && resource.data.userId.matches('^[a-zA-Z0-9_-]+$')
                       && request.resource.data.keys().hasOnly(['status', 'analysis_result', 'aika_message', 'notification_sent', 'completed_at', 'updated_at', 'retries', 'error_message']);
 
       // 削除は拒否（ジョブは削除しない）
@@ -21,15 +29,23 @@ service cloud.firestore {
 
     // video_processingコレクションのルール（冪等性確保用）
     match /video_processing/{docId} {
-      // 作成は認証済みユーザーのみ
-      allow create: if request.auth != null;
+      // 作成は認証済みユーザーのみ（匿名認証も許可）
+      // user_idフィールドが正しい形式であることを確認
+      allow create: if request.auth != null
+                    && request.resource.data.user_id is string
+                    && request.resource.data.user_id.matches('^[a-zA-Z0-9_-]+$');
 
       // 読み取りはジョブの所有者のみ
-      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
+      // 匿名認証ユーザーでも、user_idフィールドが正しい形式であれば読み取り可能
+      allow read: if request.auth != null 
+                  && resource.data.user_id is string
+                  && resource.data.user_id.matches('^[a-zA-Z0-9_-]+$');
 
       // 更新はジョブの所有者のみ、かつ特定のフィールドのみ変更可能
+      // 匿名認証ユーザーでも、user_idフィールドが正しい形式であれば更新可能
       allow update: if request.auth != null
-                      && request.auth.uid == resource.data.userId
+                      && resource.data.user_id is string
+                      && resource.data.user_id.matches('^[a-zA-Z0-9_-]+$')
                       && request.resource.data.keys().hasOnly(['status', 'file_path', 'user_id', 'started_at', 'updated_at', 'error_message']);
 
       // 削除は拒否

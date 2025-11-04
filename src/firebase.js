@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getStorage, ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { getAuth, signInAnonymously } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { FIREBASE_CONFIG } from './config.js';
 
@@ -13,21 +13,32 @@ const firestore = getFirestore(app);
 console.log('✅ Firebase Core Services Initialized');
 
 /**
- * Initialize Firebase (for compatibility)
+ * Initialize Firebase and ensure authentication
+ * モバイル環境でも匿名認証を実行してFirestore/Storageへのアクセスを可能にする
  */
 export async function initFirebase() {
     // Firebase is already initialized above
-    // This function exists for compatibility with main.js
-    return Promise.resolve();
-}
-
-// --- Anonymous Auth for Dev Mode ---
-if (import.meta.env.DEV) {
+    
+    // 認証状態を確認して、未認証の場合は匿名認証を実行
     if (!auth.currentUser) {
-        signInAnonymously(auth)
-            .then(() => console.log('✅ Dev Mode: Anonymous Auth Success'))
-            .catch(error => console.error('❌ Dev Mode: Anonymous Auth Failed', error));
+        try {
+            console.log('🔐 認証されていないため、匿名認証を開始します...');
+            await signInAnonymously(auth);
+            console.log('✅ Firebase匿名認証成功 - UID:', auth.currentUser?.uid);
+        } catch (error) {
+            console.error('❌ Firebase匿名認証失敗:', error);
+            console.error('Error details:', {
+                code: error.code,
+                message: error.message,
+                name: error.name
+            });
+            throw new Error(`Firebase認証に失敗しました: ${error.message}`);
+        }
+    } else {
+        console.log('✅ Firebase認証済み - UID:', auth.currentUser.uid);
     }
+    
+    return Promise.resolve();
 }
 
 /**
@@ -36,9 +47,62 @@ if (import.meta.env.DEV) {
  * @param {string} fileName - The name of the video file.
  * @returns {Promise<string>} - The unique ID of the created job.
  */
+/**
+ * Waits for authentication to complete
+ * @returns {Promise<void>}
+ */
+async function waitForAuth() {
+    if (auth.currentUser) {
+        return Promise.resolve();
+    }
+    
+    return new Promise((resolve, reject) => {
+        const unsubscribe = onAuthStateChanged(auth, (user) => {
+            unsubscribe();
+            if (user) {
+                console.log('✅ Auth state changed - user authenticated:', user.uid);
+                resolve();
+            } else {
+                reject(new Error('認証が完了しませんでした'));
+            }
+        });
+        
+        // タイムアウト: 10秒
+        setTimeout(() => {
+            unsubscribe();
+            reject(new Error('認証のタイムアウト'));
+        }, 10000);
+    });
+}
+
 async function createVideoJob(userId, fileName) {
     try {
+        // 認証状態を確実に確認
+        console.log('🔐 認証状態を確認中...');
+        console.log('   現在の認証状態:', auth.currentUser ? `認証済み (UID: ${auth.currentUser.uid})` : '未認証');
+        
+        // 認証されていない場合は匿名認証を実行
+        if (!auth.currentUser) {
+            console.log('🔐 匿名認証を開始します...');
+            try {
+                await signInAnonymously(auth);
+                console.log('✅ 匿名認証成功 - UID:', auth.currentUser?.uid);
+            } catch (error) {
+                console.error('❌ 匿名認証失敗:', error);
+                throw new Error('Firebase認証に失敗しました。ページを再読み込みしてください。');
+            }
+        }
+        
+        // 認証状態が確実に設定されるまで待機
+        await waitForAuth();
+        
+        if (!auth.currentUser) {
+            throw new Error('認証が完了していません。ページを再読み込みしてください。');
+        }
+        
         console.log(`📝 Creating job for user: ${userId}, file: ${fileName}`);
+        console.log(`🔐 Current auth UID: ${auth.currentUser?.uid}`);
+        console.log(`🔐 Auth state: ${auth.currentUser ? 'authenticated' : 'not authenticated'}`);
         
         // タイムアウト付きでFirestoreジョブを作成（モバイル環境対応）
         const jobsCollection = collection(firestore, 'video_jobs');
@@ -65,14 +129,24 @@ async function createVideoJob(userId, fileName) {
         console.error('Error details:', {
             code: error.code,
             message: error.message,
-            name: error.name
+            name: error.name,
+            authState: auth.currentUser ? 'authenticated' : 'not authenticated',
+            authUID: auth.currentUser?.uid
         });
         
         // より詳細なエラーメッセージ
         if (error.message.includes('タイムアウト')) {
             throw new Error("解析ジョブの作成がタイムアウトしました。ネットワークを確認して、もう一度お試しください。");
         } else if (error.code === 'permission-denied') {
-            throw new Error("解析ジョブの作成権限がありません。LINEアプリでログインし直してください。");
+            console.error('❌ Permission denied - 認証状態の詳細:', {
+                hasAuth: !!auth.currentUser,
+                authUID: auth.currentUser?.uid,
+                userId: userId,
+                fileName: fileName
+            });
+            throw new Error("解析ジョブの作成権限がありません。ページを再読み込みしてください。");
+        } else if (error.code === 'unauthenticated') {
+            throw new Error("認証が必要です。ページを再読み込みしてください。");
         } else {
             throw new Error("解析ジョブの作成に失敗しました。やり直してください。");
         }
@@ -92,7 +166,20 @@ export async function uploadVideoToStorage(videoFile, userId, progressCallback) 
         throw new Error('不正なユーザーIDです。');
     }
 
+    // 認証状態を確認
+    if (!auth.currentUser) {
+        console.warn('⚠️ 認証されていないため、匿名認証を再試行します...');
+        try {
+            await signInAnonymously(auth);
+            console.log('✅ 匿名認証成功 - UID:', auth.currentUser?.uid);
+        } catch (error) {
+            console.error('❌ 匿名認証失敗:', error);
+            throw new Error('Firebase認証に失敗しました。ページを再読み込みしてください。');
+        }
+    }
+
     console.log(`📤 Upload request - User: ${userId}, File: ${videoFile.name}, Size: ${(videoFile.size / 1024 / 1024).toFixed(2)}MB`);
+    console.log(`🔐 Current auth UID: ${auth.currentUser?.uid}`);
 
     // 1. Create a job document in Firestore first.
     let jobId;
