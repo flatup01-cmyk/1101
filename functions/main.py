@@ -70,9 +70,15 @@ PROJECT_ID = os.environ.get('GCP_PROJECT', 'aikaapp-584fa')
 # LINEアクセストークンはSecret Managerから読み込み（最優先・セキュリティ強化）
 
 
-# Dify API設定（環境変数から）
+# Dify API設定（環境変数から・必須）
 DIFY_API_ENDPOINT = os.environ.get('DIFY_API_ENDPOINT', 'https://api.dify.ai/v1/chat-messages')
-DIFY_API_KEY = os.environ.get('DIFY_API_KEY', 'app-z5S8OBIYaET8dSCdN6G63yvF')
+DIFY_API_KEY = os.environ.get('DIFY_API_KEY')
+
+# 環境変数の検証
+if not DIFY_API_KEY:
+    logger.error("❌ CRITICAL: DIFY_API_KEY環境変数が設定されていません")
+    logger.error("Firebase Console → Functions → 環境変数で設定してください")
+    # 本番環境では環境変数が必須（ハードコードされたフォールバックは削除）
 
 
 # --- MCP連携関数 ---
@@ -93,7 +99,10 @@ def call_dify_via_mcp(scores, user_id):
     global DIFY_API_ENDPOINT, DIFY_API_KEY
     
     if not DIFY_API_ENDPOINT or not DIFY_API_KEY:
-        logger.warning("⚠️ Dify API設定がありません")
+        logger.error("❌ Dify API設定が不完全です")
+        logger.error(f"DIFY_API_ENDPOINT: {'設定済み' if DIFY_API_ENDPOINT else '未設定'}")
+        logger.error(f"DIFY_API_KEY: {'設定済み' if DIFY_API_KEY else '未設定'}")
+        logger.error("Firebase Console → Functions → 環境変数で設定してください")
         return None
     
     try:
