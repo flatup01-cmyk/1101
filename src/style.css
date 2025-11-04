@@ -24,13 +24,32 @@
 
 body {
   font-family: var(--font-main);
-  background: linear-gradient(135deg, var(--background-gradient-start) 0%, var(--background-gradient-end) 100%);
+  background: linear-gradient(135deg, rgba(44, 30, 56, 0.8) 0%, rgba(74, 42, 82, 0.8) 100%);
+  background-image: url('https://ik.imagekit.io/FLATUPGYM/b9d4a676-0903-444c-91d2-50222dc3294f.png?updatedAt=1760340781490');
+  background-size: cover;
+  background-position: center center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  background-blend-mode: overlay;
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--text-color);
   overflow: hidden;
+  position: relative;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, rgba(44, 30, 56, 0.6) 0%, rgba(74, 42, 82, 0.6) 100%);
+  z-index: -1;
+  pointer-events: none;
 }
 
 .container {

@@ -20,13 +20,32 @@
 
 body {
   font-family: 'Courier New', monospace;
-  background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 100%);
+  background: linear-gradient(135deg, rgba(10, 10, 15, 0.8) 0%, rgba(26, 26, 46, 0.8) 100%);
+  background-image: url('https://ik.imagekit.io/FLATUPGYM/b9d4a676-0903-444c-91d2-50222dc3294f.png?updatedAt=1760340781490');
+  background-size: cover;
+  background-position: center center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  background-blend-mode: overlay;
   color: var(--text-primary);
   min-height: 100vh;
   display: flex;
   justify-content: center;
   align-items: center;
   overflow-x: hidden;
+  position: relative;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, rgba(10, 10, 15, 0.6) 0%, rgba(26, 26, 46, 0.6) 100%);
+  z-index: -1;
+  pointer-events: none;
 }
 
 .container {
