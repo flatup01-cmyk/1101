@@ -70,8 +70,8 @@ function renderUI() {
 function createUploadView() {
   return `
     <div class="main-layout">
-      <!-- キャラクター画像カード -->
-      <div class="character-card">
+      <!-- キャラクター画像カード - 必ず先頭に表示 -->
+      <div class="character-card" style="order: -1;">
         <img src="https://ik.imagekit.io/FLATUPGYM/b9d4a676-0903-444c-91d2-50222dc3294f.png?updatedAt=1760340781490" 
              alt="AIKA" 
              class="character-image"

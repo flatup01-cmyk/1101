@@ -74,7 +74,7 @@ body::before {
   animation: fadeInUp 0.8s ease-out;
 }
 
-/* キャラクター画像カード */
+/* キャラクター画像カード - 必ず先頭に表示 */
 .character-card {
   width: 100%;
   border-radius: var(--border-radius);
@@ -86,6 +86,8 @@ body::before {
   position: relative;
   aspect-ratio: 16 / 9;
   max-height: 400px;
+  order: -1; /* flexboxで確実に先頭に */
+  z-index: 1; /* 確実に前面に */
 }
 
 .character-image {
