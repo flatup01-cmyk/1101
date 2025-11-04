@@ -573,23 +573,67 @@ if functions_framework:
         
         Storageにファイルが作成されると自動で呼ばれます
         """
-        # CloudEventからデータを抽出
-        event_data = cloud_event.data.get('data', {})
-        
-        # Base64デコードが必要な場合
-        if isinstance(event_data, str):
-            try:
-                decoded_data = base64.b64decode(event_data).decode('utf-8')
-                event_data = json.loads(decoded_data)
-            except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        try:
+            logger.info(f"🔔 CloudEvent受信: {cloud_event}")
+            logger.info(f"🔔 CloudEvent type: {cloud_event.get('type', 'unknown')}")
+            logger.info(f"🔔 CloudEvent source: {cloud_event.get('source', 'unknown')}")
+            
+            # CloudEventのデータ構造を確認
+            event_data = cloud_event.data if hasattr(cloud_event, 'data') else cloud_event.get('data', {})
+            
+            # CloudEventのdataフィールドが文字列の場合（Base64エンコードされている可能性）
+            if isinstance(event_data, str):
                 try:
-                    event_data = json.loads(event_data)
-                except json.JSONDecodeError:
-                    logger.error("⚠️ CloudEventデータのパースに失敗しました")
-                    event_data = {}
-        
-        # process_video関数を呼び出し
-        return process_video(event_data, None)
+                    # Base64デコードを試みる
+                    decoded_data = base64.b64decode(event_data).decode('utf-8')
+                    event_data = json.loads(decoded_data)
+                    logger.info(f"✅ Base64デコード成功: {event_data}")
+                except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as e:
+                    # Base64デコード失敗時はJSONとして直接パース
+                    try:
+                        event_data = json.loads(event_data)
+                        logger.info(f"✅ JSONパース成功: {event_data}")
+                    except json.JSONDecodeError:
+                        logger.error(f"❌ CloudEventデータのパースに失敗しました: {str(e)}")
+                        event_data = {}
+            elif isinstance(event_data, dict):
+                # 既に辞書形式の場合
+                logger.info(f"✅ CloudEventデータは辞書形式: {event_data}")
+            else:
+                # その他の形式の場合、空の辞書に設定
+                logger.warning(f"⚠️ 予期しないCloudEventデータ形式: {type(event_data)}")
+                event_data = {}
+            
+            # CloudEventの属性から情報を取得（フォールバック）
+            if not event_data.get('name') and hasattr(cloud_event, 'subject'):
+                # CloudEventのsubjectフィールドにファイルパスが含まれている場合
+                subject = cloud_event.subject
+                if subject:
+                    event_data['name'] = subject
+                    logger.info(f"✅ CloudEvent subjectからファイルパスを取得: {subject}")
+            
+            if not event_data.get('bucket'):
+                # CloudEventのsourceからバケット名を抽出
+                source = cloud_event.get('source', '') if isinstance(cloud_event, dict) else getattr(cloud_event, 'source', '')
+                if source:
+                    # source例: //storage.googleapis.com/projects/_/buckets/aikaapp-584fa.firebasestorage.app
+                    if 'buckets/' in source:
+                        bucket_name = source.split('buckets/')[-1].split('/')[0]
+                        event_data['bucket'] = bucket_name
+                        logger.info(f"✅ CloudEvent sourceからバケット名を取得: {bucket_name}")
+            
+            logger.info(f"📋 処理するデータ: {event_data}")
+            
+            # process_video関数を呼び出し
+            result = process_video(event_data, None)
+            logger.info(f"✅ 処理完了: {result}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ process_video_triggerエラー: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            raise
 
 
 # テスト用（ローカル実行時）
