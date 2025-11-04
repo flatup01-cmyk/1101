@@ -258,30 +258,64 @@ async function main() {
   
   try {
     console.log('🚀 アプリケーション初期化開始...');
+    console.log('📱 環境情報:', {
+      isMobile: isMobileDevice(),
+      isInLINE: isInLINEApp(),
+      userAgent: navigator.userAgent.substring(0, 50) + '...',
+      url: window.location.href
+    });
     
     // Firebase初期化
+    console.log('🔥 Firebase初期化を開始...');
     await initFirebase();
     console.log('✅ Firebase初期化完了');
     
     // LIFF初期化
+    console.log('📱 LIFF初期化を開始...');
     const profile = await initLiff();
     console.log('✅ LIFF初期化完了:', profile?.userId);
     
     if (profile && profile.userId) {
       appState.profile = profile;
       setState({ uiState: 'idle' });
+      console.log('✅ アプリケーション初期化完了');
     } else {
       console.error('❌ プロファイルが取得できませんでした');
       handleError('ユーザー情報の取得に失敗しました。LINEアプリ内でページを再読み込みしてください。');
     }
   } catch (error) {
     console.error('❌ 初期化失敗:', error);
+    console.error('エラー詳細:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
     handleError(error.message || TSUN_MESSAGES.liffError);
   }
 }
 
+// モバイル環境の検出
+function isMobileDevice() {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
+
+// LINEアプリ内で開いているか確認
+function isInLINEApp() {
+  return window.navigator.userAgent.includes('Line') || 
+         window.location.href.includes('liff.line.me') ||
+         typeof liff !== 'undefined' && liff.isInClient && liff.isInClient();
+}
+
 async function initLiff() {
   try {
+    // デバイス情報をログに出力
+    console.log('📱 デバイス情報:', {
+      userAgent: navigator.userAgent,
+      isMobile: isMobileDevice(),
+      isInLINE: isInLINEApp(),
+      liffId: LIFF_CONFIG.liffId ? `${LIFF_CONFIG.liffId.substring(0, 10)}...` : '未設定'
+    });
+
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('dev') === 'true' || import.meta.env.DEV) {
       console.log('🔧 Development mode detected.');
@@ -291,6 +325,24 @@ async function initLiff() {
       };
     }
 
+    // LIFF IDの確認
+    if (!LIFF_CONFIG.liffId) {
+      console.error('❌ LIFF IDが設定されていません');
+      throw new Error('LIFF IDが設定されていません。Netlifyの環境変数を確認してください。');
+    }
+
+    // LINEアプリ内で開いているか確認
+    if (!isInLINEApp()) {
+      console.warn('⚠️ LINEアプリ内で開いていません');
+      // モバイルデバイスの場合、LINEアプリで開くように促す
+      if (isMobileDevice()) {
+        throw new Error('このアプリはLINEアプリ内で開く必要があります。LINEアプリで再度お試しください。');
+      }
+    }
+
+    console.log('🔐 LIFF初期化を開始します...');
+    console.log('   LIFF ID:', LIFF_CONFIG.liffId ? `${LIFF_CONFIG.liffId.substring(0, 10)}...` : '未設定');
+
     // LIFF初期化（タイムアウト付き）
     await Promise.race([
       liff.init({ liffId: LIFF_CONFIG.liffId }),
@@ -299,7 +351,12 @@ async function initLiff() {
       )
     ]);
 
+    console.log('✅ LIFF初期化成功');
+    console.log('   isLoggedIn:', liff.isLoggedIn());
+    console.log('   isInClient:', liff.isInClient ? liff.isInClient() : 'N/A');
+
     if (!liff.isLoggedIn()) {
+      console.log('🔐 ログインしていないため、ログインを開始します...');
       liff.login();
       // This will redirect, so we wait indefinitely
       return new Promise(() => {}); 
