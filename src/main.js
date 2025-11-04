@@ -343,24 +343,54 @@ function getVideoDuration(file) {
     
     let timeoutId;
     let objectURL;
+    let isCleanedUp = false; // クリーンアップ済みフラグ
+    let hasResolved = false; // 解決済みフラグ（重複エラー防止）
     
     // 60秒タイムアウト（モバイルでのメタデータ読み込み遅延に対応）
     timeoutId = setTimeout(() => {
-      console.warn('⏱️ Video metadata loading timeout after 60s');
-      cleanup();
-      reject(new Error('動画の読み込みがタイムアウトしました。ネットワーク環境を確認してください。'));
+      if (!hasResolved) {
+        console.warn('⏱️ Video metadata loading timeout after 60s');
+        cleanup();
+        reject(new Error('動画の読み込みがタイムアウトしました。ネットワーク環境を確認してください。'));
+      }
     }, 60000);
     
     const cleanup = () => {
+      if (isCleanedUp) return; // 重複クリーンアップ防止
+      isCleanedUp = true;
+      
       clearTimeout(timeoutId);
+      
+      // イベントリスナーを削除（重複エラー防止）
+      video.onloadedmetadata = null;
+      video.onerror = null;
+      video.onabort = null;
+      
       if (objectURL) {
-        window.URL.revokeObjectURL(objectURL);
+        try {
+          window.URL.revokeObjectURL(objectURL);
+        } catch (e) {
+          // 無視
+        }
       }
+      
       video.src = '';
       video.load(); // リソースを解放
+      
+      // videoエレメントをDOMから削除（メモリリーク防止）
+      try {
+        if (video.parentNode) {
+          video.parentNode.removeChild(video);
+        }
+      } catch (e) {
+        // 無視
+      }
     };
     
     video.onloadedmetadata = () => {
+      if (hasResolved) return; // 重複呼び出し防止
+      hasResolved = true;
+      
       const duration = video.duration;
       console.log(`✅ Video duration loaded: ${duration}s`);
       cleanup();
@@ -375,9 +405,28 @@ function getVideoDuration(file) {
     };
     
     video.onerror = (e) => {
-      console.error('❌ Video loading error:', e);
+      if (hasResolved) return; // 重複エラー防止
+      hasResolved = true;
+      
+      // エラーの詳細をログに記録（最初の1回のみ）
+      const errorDetails = {
+        code: video.error ? video.error.code : 'unknown',
+        message: video.error ? video.error.message : 'unknown',
+        networkState: video.networkState,
+        readyState: video.readyState
+      };
+      console.error('❌ Video loading error:', errorDetails);
       cleanup();
       reject(new Error('動画ファイルを読み込めませんでした。ファイル形式を確認してください。'));
+    };
+    
+    // 中断時の処理も追加
+    video.onabort = () => {
+      if (hasResolved) return;
+      hasResolved = true;
+      console.warn('⚠️ Video loading aborted');
+      cleanup();
+      reject(new Error('動画の読み込みが中断されました。'));
     };
     
     // メタデータ読み込みを開始
@@ -387,10 +436,12 @@ function getVideoDuration(file) {
       video.src = objectURL;
       video.load(); // 明示的に読み込み開始
     } catch (error) {
+      if (hasResolved) return;
+      hasResolved = true;
       console.error('❌ Error creating object URL:', error);
       cleanup();
       reject(new Error('動画ファイルの処理中にエラーが発生しました。'));
-  }
+    }
   });
 }
 
