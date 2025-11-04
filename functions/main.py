@@ -298,7 +298,8 @@ def process_video(data, context):
                 return {"status": "error", "reason": "invalid data format"}
     
     file_path = data.get('name') or data.get('file')
-    bucket_name = data.get('bucket', os.environ.get('STORAGE_BUCKET', 'aikaapp-584fa.appspot.com'))
+    # バケット名をフロントエンドと統一（新しいFirebase Storage形式）
+    bucket_name = data.get('bucket', os.environ.get('STORAGE_BUCKET', 'aikaapp-584fa.firebasestorage.app'))
     
     logger.info(f"処理開始: {file_path} (bucket: {bucket_name})")
     
@@ -572,39 +573,67 @@ def process_video(data, context):
 
 
 
-# Firebase Storage トリガー関数（CloudEvent形式）
+# Firebase Storage トリガー関数（CloudEvent形式・Cloud Storage v2仕様対応）
 if functions_framework:
     @functions_framework.cloud_event
     def process_video_trigger(cloud_event):
         """
-        Firebase StorageのCloudEventトリガー
+        Firebase StorageのCloudEventトリガー（Cloud Storage v2仕様対応）
         
         Storageにファイルが作成されると自動で呼ばれます
         """
-        # CloudEventからデータを抽出
-        event_data = cloud_event.data.get('data', {})
+        logger.info(f"🔔 CloudEvent受信: {cloud_event['type']}")
+        logger.info(f"📦 CloudEventソース: {cloud_event.get('source', 'unknown')}")
         
-        # Base64デコードが必要な場合
-        if isinstance(event_data, str):
-            try:
-                decoded_data = base64.b64decode(event_data).decode('utf-8')
-                event_data = json.loads(decoded_data)
-            except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
-                try:
-                    event_data = json.loads(event_data)
-                except json.JSONDecodeError:
-                    logger.error("⚠️ CloudEventデータのパースに失敗しました")
-                    event_data = {}
-        
-        # process_video関数を呼び出し
-        return process_video(event_data, None)
+        # Cloud Storage v2仕様のCloudEventデータ構造を処理
+        try:
+            # CloudEventのdataフィールドからStorageオブジェクト情報を取得
+            event_data = cloud_event.get('data', {})
+            
+            # Cloud Storage v2仕様: dataフィールドに直接オブジェクト情報が含まれる
+            if isinstance(event_data, dict):
+                # バケット名とファイル名を取得
+                bucket = event_data.get('bucket', '')
+                name = event_data.get('name', '')
+                
+                if not bucket or not name:
+                    logger.error(f"❌ CloudEventデータが不完全: bucket={bucket}, name={name}")
+                    return {"status": "error", "reason": "incomplete event data"}
+                
+                # process_video関数に渡す形式に変換
+                video_data = {
+                    'bucket': bucket,
+                    'name': name
+                }
+                
+                logger.info(f"📁 処理対象ファイル: {name} (バケット: {bucket})")
+                return process_video(video_data, None)
+            else:
+                # 文字列形式の場合（Base64デコードが必要な場合）
+                if isinstance(event_data, str):
+                    try:
+                        decoded_data = base64.b64decode(event_data).decode('utf-8')
+                        event_data = json.loads(decoded_data)
+                        return process_video(event_data, None)
+                    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as e:
+                        logger.error(f"❌ CloudEventデータのデコードエラー: {e}")
+                        return {"status": "error", "reason": "decode error"}
+                else:
+                    logger.error(f"❌ 予期しないCloudEventデータ形式: {type(event_data)}")
+                    return {"status": "error", "reason": "unexpected event data format"}
+                    
+        except Exception as e:
+            logger.error(f"❌ CloudEvent処理エラー: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"status": "error", "reason": str(e)}
 
 
 # テスト用（ローカル実行時）
 if __name__ == '__main__':
     test_data = {
         'name': 'videos/test_user/1234567890-test.mp4',
-        'bucket': 'aikaapp-584fa.appspot.com'
+        'bucket': 'aikaapp-584fa.firebasestorage.app'
     }
     
     result = process_video(test_data, None)

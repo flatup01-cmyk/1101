@@ -15,7 +15,8 @@ from google.cloud import storage
 storage_client = storage.Client()
 
 # 設定
-BUCKET_NAME = os.environ.get('STORAGE_BUCKET', 'aikaapp-584fa.appspot.com')
+# バケット名をフロントエンドと統一（新しいFirebase Storage形式）
+BUCKET_NAME = os.environ.get('STORAGE_BUCKET', 'aikaapp-584fa.firebasestorage.app')
 STORAGE_LIMIT_MB = float(os.environ.get('STORAGE_LIMIT_MB', '2560'))  # 2.5GB = 2,560MB（デフォルト）
 DELETE_AGE_DAYS = int(os.environ.get('DELETE_AGE_DAYS', '30'))  # 30日以上経過した動画も削除（デフォルト）
 
