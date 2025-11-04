@@ -302,12 +302,14 @@ def process_video(data, context):
     # バケット名をフロントエンドと統一（新しいFirebase Storage形式）
     bucket_name = data.get('bucket', os.environ.get('STORAGE_BUCKET', 'aikaapp-584fa.firebasestorage.app'))
     
-    logger.info(f"処理開始: {file_path} (bucket: {bucket_name})")
+    logger.info(f"📥 受信データ: {json.dumps(data, ensure_ascii=False)}")
+    logger.info(f"📁 処理開始: file_path={file_path}, bucket={bucket_name}")
     
     # videos/で始まらないファイルは無視
     if not file_path or not file_path.startswith('videos/'):
-        logger.info(f"スキップ: videos/で始まらないファイル: {file_path}")
-        return {"status": "skipped", "reason": "not a video file"}
+        logger.warning(f"⚠️ スキップ: videos/で始まらないファイル: {file_path}")
+        logger.warning(f"   完全なデータ: {json.dumps(data, ensure_ascii=False)}")
+        return {"status": "skipped", "reason": "not a video file", "file_path": file_path}
     
     # パストラバーサル攻撃対策
     import os.path
@@ -638,6 +640,13 @@ if functions_framework:
                 }
                 
                 logger.info(f"📁 処理対象ファイル: {name} (バケット: {bucket})")
+                
+                # パスの検証（事前チェック）
+                if not name.startswith('videos/'):
+                    logger.warning(f"⚠️ パスがvideos/で始まらない: {name}")
+                    logger.warning(f"   完全なevent_data: {json.dumps(event_data, ensure_ascii=False)}")
+                    return {"status": "skipped", "reason": "not a video file", "file_path": name}
+                
                 try:
                     result = process_video(video_data, None)
                     logger.info(f"✅ 処理完了: {json.dumps(result, ensure_ascii=False)}")
