@@ -3,7 +3,7 @@
 
 import liff from '@line/liff';
 import { LIFF_CONFIG } from './config.js';
-import { uploadVideoToStorage, initFirebase } from './firebase.js';
+import { uploadVideoToStorage, initFirebase, ensureFirebaseAuth } from './firebase.js';
 
 // --- State Management & Constants ---
 
@@ -250,6 +250,18 @@ async function main() {
     await initFirebase();
     const profile = await initLiff();
     appState.profile = profile;
+    
+    // LIFF認証成功後、Firebase Anonymous認証を実行（必須）
+    // Firestoreのセキュリティルールで認証が必要なため
+    try {
+      await ensureFirebaseAuth();
+      console.log('✅ Firebase認証完了');
+    } catch (authError) {
+      console.error('❌ Firebase認証エラー:', authError);
+      handleError('Firebase認証に失敗しました。もう一度お試しください。');
+      return;
+    }
+    
     setState({ uiState: 'idle' });
   } catch (error) {
     console.error('Initialization failed:', error);

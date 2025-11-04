@@ -21,6 +21,29 @@ export async function initFirebase() {
     return Promise.resolve();
 }
 
+/**
+ * Firebase Anonymous認証を実行（LIFF認証後、必ず実行）
+ * Firestoreのセキュリティルールで認証が必要なため、本番環境でも必須
+ */
+export async function ensureFirebaseAuth() {
+    try {
+        // 既に認証済みの場合はスキップ
+        if (auth.currentUser) {
+            console.log('✅ Firebase認証済み:', auth.currentUser.uid);
+            return auth.currentUser;
+        }
+
+        // 匿名認証を実行
+        console.log('🔐 Firebase Anonymous認証を開始...');
+        const userCredential = await signInAnonymously(auth);
+        console.log('✅ Firebase Anonymous認証成功:', userCredential.user.uid);
+        return userCredential.user;
+    } catch (error) {
+        console.error('❌ Firebase Anonymous認証失敗:', error);
+        throw new Error('Firebase認証に失敗しました。もう一度お試しください。');
+    }
+}
+
 // --- Anonymous Auth for Dev Mode ---
 if (import.meta.env.DEV) {
     if (!auth.currentUser) {
