@@ -1,15 +1,19 @@
-/* AIKA18号 UI Revolution CSS - 革命的UIスタイル */
+/* AIKA18号 UI Revolution CSS - 100点デザイン */
 
 :root {
   --primary-color: #ff6b9d;
   --primary-dark: #c44569;
   --secondary-color: #64ff64;
+  --accent-color: #64c8ff;
   --error-color: #ff6464;
   --bg-dark: #0a0a0f;
-  --bg-card: rgba(255, 255, 255, 0.05);
+  --bg-card: rgba(255, 255, 255, 0.1);
+  --bg-card-dark: rgba(0, 0, 0, 0.3);
   --text-primary: #ffffff;
   --text-secondary: rgba(255, 255, 255, 0.8);
   --shadow-glow: 0 20px 60px rgba(255, 107, 157, 0.4);
+  --shadow-card: 0 10px 40px rgba(0, 0, 0, 0.5);
+  --border-radius: 20px;
 }
 
 * {
@@ -19,8 +23,8 @@
 }
 
 body {
-  font-family: 'Courier New', monospace;
-  background: linear-gradient(135deg, rgba(10, 10, 15, 0.8) 0%, rgba(26, 26, 46, 0.8) 100%);
+  font-family: 'Hiragino Kaku Gothic ProN', 'Meiryo', 'Noto Sans JP', sans-serif;
+  background: linear-gradient(135deg, rgba(10, 10, 15, 0.85) 0%, rgba(26, 26, 46, 0.85) 100%);
   background-image: url('https://ik.imagekit.io/FLATUPGYM/b9d4a676-0903-444c-91d2-50222dc3294f.png?updatedAt=1760340781490');
   background-size: cover;
   background-position: center center;
@@ -31,9 +35,10 @@ body {
   min-height: 100vh;
   display: flex;
   justify-content: center;
-  align-items: center;
+  align-items: flex-start;
   overflow-x: hidden;
   position: relative;
+  padding: 1rem;
 }
 
 body::before {
@@ -43,7 +48,7 @@ body::before {
   left: 0;
   width: 100%;
   height: 100%;
-  background: linear-gradient(135deg, rgba(10, 10, 15, 0.6) 0%, rgba(26, 26, 46, 0.6) 100%);
+  background: linear-gradient(135deg, rgba(10, 10, 15, 0.7) 0%, rgba(26, 26, 46, 0.7) 100%);
   z-index: -1;
   pointer-events: none;
 }
@@ -51,154 +56,248 @@ body::before {
 .container {
   width: 100%;
   max-width: 600px;
-  padding: 2rem;
+  padding: 1rem;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   min-height: 100vh;
+  gap: 1.5rem;
 }
 
-/* 巨大アップロードボタン（革命的デザイン） */
-.upload-container {
+/* メインレイアウト */
+.main-layout {
   width: 100%;
   display: flex;
-  justify-content: center;
-  align-items: center;
+  flex-direction: column;
+  gap: 1.5rem;
+  animation: fadeInUp 0.8s ease-out;
+}
+
+/* キャラクター画像カード */
+.character-card {
+  width: 100%;
+  border-radius: var(--border-radius);
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+  background: var(--bg-card-dark);
+  backdrop-filter: blur(10px);
+  border: 2px solid rgba(255, 107, 157, 0.3);
   position: relative;
+  aspect-ratio: 16 / 9;
+  max-height: 400px;
 }
 
-#video-input {
-  display: none;
+.character-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
 }
 
-.giant-upload-btn {
-  width: 400px;
-  height: 400px;
-  max-width: 90vw;
-  max-height: 90vw;
-  aspect-ratio: 1;
-  border-radius: 50%;
-  border: none;
-  background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+.character-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.5) 50%, transparent 100%);
+  padding: 2rem 1.5rem 1.5rem;
+  text-align: center;
+}
+
+.character-name {
+  font-size: 2rem;
+  font-weight: bold;
   color: var(--text-primary);
-  cursor: pointer;
+  text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.8);
+  margin-bottom: 0.5rem;
+  letter-spacing: 0.1em;
+}
+
+.character-subtitle {
+  font-size: 1rem;
+  color: var(--text-secondary);
+  text-shadow: 1px 1px 4px rgba(0, 0, 0, 0.8);
+  opacity: 0.9;
+}
+
+/* アップロードカード */
+.upload-card {
+  width: 100%;
+  background: var(--bg-card);
+  backdrop-filter: blur(10px);
+  border-radius: var(--border-radius);
+  padding: 2rem;
+  box-shadow: var(--shadow-card);
+  border: 2px solid rgba(255, 107, 157, 0.3);
   display: flex;
   flex-direction: column;
-  justify-content: center;
   align-items: center;
-  gap: 1rem;
-  padding: 2rem;
+  gap: 1.5rem;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.upload-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+  transition: left 0.5s ease;
+}
+
+.upload-card:hover::before {
+  left: 100%;
+}
+
+.upload-card:hover {
+  border-color: var(--primary-color);
+  box-shadow: 0 15px 50px rgba(255, 107, 157, 0.4);
+  transform: translateY(-5px);
+}
+
+.upload-card-icon {
+  font-size: 4rem;
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.5));
+  animation: icon-bounce 2s ease-in-out infinite;
+}
+
+.upload-card-content {
+  text-align: center;
+  width: 100%;
+}
+
+.upload-card-title {
+  font-size: 1.8rem;
+  font-weight: bold;
+  color: var(--text-primary);
+  margin-bottom: 0.5rem;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.upload-card-description {
+  font-size: 1rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 1rem;
+}
+
+.upload-card-button {
+  width: 100%;
+  max-width: 400px;
+  padding: 1.2rem 2rem;
+  background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+  color: var(--text-primary);
+  border: none;
+  border-radius: 12px;
+  font-size: 1.1rem;
+  font-weight: bold;
+  cursor: pointer;
   box-shadow: var(--shadow-glow);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
   overflow: hidden;
-  animation: pulse-glow 2s ease-in-out infinite;
+  font-family: 'Courier New', monospace;
 }
 
-.giant-upload-btn::before {
+.upload-card-button::before {
   content: '';
   position: absolute;
-  top: -50%;
-  left: -50%;
-  width: 200%;
-  height: 200%;
-  background: linear-gradient(45deg, transparent, rgba(255, 255, 255, 0.1), transparent);
-  transform: rotate(45deg);
-  animation: shine 3s infinite;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: left 0.5s ease;
 }
 
-.giant-upload-btn:hover {
+.upload-card-button:hover {
   transform: scale(1.05);
   box-shadow: 0 25px 70px rgba(255, 107, 157, 0.6);
 }
 
-.giant-upload-btn:active {
-  transform: scale(0.95);
+.upload-card-button:hover::before {
+  left: 100%;
 }
 
-.giant-upload-btn:disabled,
-.giant-upload-btn.loading-state {
+.upload-card-button:active {
+  transform: scale(0.98);
+}
+
+.upload-card-button:disabled,
+.upload-card-button.loading-state {
   opacity: 0.6;
   cursor: not-allowed;
   animation: pulse-loading 1.5s ease-in-out infinite;
 }
 
-@keyframes pulse-loading {
-  0%, 100% {
-    opacity: 0.6;
-  }
-  50% {
-    opacity: 0.4;
-  }
-}
-
-.btn-icon {
-  font-size: 5rem;
-  animation: icon-bounce 2s ease-in-out infinite;
-}
-
-.btn-text {
-  font-size: 1.2rem;
-  font-weight: bold;
+.upload-card-hint {
+  width: 100%;
   text-align: center;
-  line-height: 1.5;
-  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
-  z-index: 1;
+  margin-top: 0.5rem;
 }
 
-.btn-hint {
+.upload-card-hint small {
+  color: var(--text-secondary);
   font-size: 0.85rem;
   opacity: 0.8;
-  text-align: center;
-  z-index: 1;
 }
 
-/* フィードバック表示 */
-.feedback-container {
+/* フィードバックカード */
+.feedback-card {
   width: 100%;
-  max-width: 500px;
-  padding: 2rem;
   background: var(--bg-card);
-  border-radius: 20px;
-  border: 2px solid rgba(255, 107, 157, 0.3);
+  backdrop-filter: blur(10px);
+  border-radius: var(--border-radius);
+  padding: 2rem;
+  box-shadow: var(--shadow-card);
   text-align: center;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 1rem;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  border: 2px solid;
+  animation: fadeInUp 0.5s ease-out;
 }
 
-.feedback-container.processing {
-  border-color: rgba(100, 200, 255, 0.3);
+.feedback-card.processing {
+  border-color: var(--accent-color);
+  background: rgba(100, 200, 255, 0.1);
 }
 
-.feedback-container.success {
-  border-color: rgba(100, 255, 100, 0.4);
-  background: rgba(100, 255, 100, 0.1);
+.feedback-card.success {
+  border-color: var(--secondary-color);
+  background: rgba(100, 255, 100, 0.15);
 }
 
-.feedback-container.error {
-  border-color: rgba(255, 100, 100, 0.4);
-  background: rgba(255, 100, 100, 0.1);
+.feedback-card.error {
+  border-color: var(--error-color);
+  background: rgba(255, 100, 100, 0.15);
 }
 
-.feedback-container .icon {
+.feedback-icon {
   font-size: 4rem;
   animation: icon-bounce 2s ease-in-out infinite;
 }
 
-.feedback-container .message {
-  font-size: 1.2rem;
+.feedback-message {
+  font-size: 1.3rem;
   font-weight: bold;
   color: var(--text-primary);
   line-height: 1.6;
+  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.5);
 }
 
-.feedback-container .sub-message {
-  font-size: 0.9rem;
+.feedback-submessage {
+  font-size: 1rem;
   color: var(--text-secondary);
   line-height: 1.5;
+  opacity: 0.9;
 }
 
 /* プログレスバー */
@@ -222,14 +321,14 @@ body::before {
 }
 
 /* アニメーション */
-@keyframes pulse-glow {
-  0%, 100% {
-    background-position: 0% 50%;
-    box-shadow: 0 20px 60px rgba(255, 107, 157, 0.4);
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
   }
-  50% {
-    background-position: 100% 50%;
-    box-shadow: 0 25px 70px rgba(255, 107, 157, 0.6);
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
@@ -242,12 +341,12 @@ body::before {
   }
 }
 
-@keyframes shine {
-  0% {
-    transform: translateX(-100%) translateY(-100%) rotate(45deg);
+@keyframes pulse-loading {
+  0%, 100% {
+    opacity: 0.6;
   }
-  100% {
-    transform: translateX(200%) translateY(200%) rotate(45deg);
+  50% {
+    opacity: 0.4;
   }
 }
 
@@ -262,40 +361,83 @@ body::before {
 
 /* レスポンシブ対応 */
 @media (max-width: 768px) {
-  .giant-upload-btn {
-    width: 300px;
-    height: 300px;
+  .container {
+    padding: 0.5rem;
+    gap: 1rem;
   }
-  
-  .btn-icon {
-    font-size: 4rem;
+
+  .character-card {
+    max-height: 300px;
   }
-  
-  .btn-text {
-    font-size: 1rem;
+
+  .character-name {
+    font-size: 1.5rem;
   }
-  
-  .feedback-container {
+
+  .character-subtitle {
+    font-size: 0.9rem;
+  }
+
+  .upload-card {
     padding: 1.5rem;
   }
-  
-  .feedback-container .icon {
+
+  .upload-card-title {
+    font-size: 1.5rem;
+  }
+
+  .upload-card-description {
+    font-size: 0.9rem;
+  }
+
+  .upload-card-button {
+    padding: 1rem 1.5rem;
+    font-size: 1rem;
+  }
+
+  .feedback-card {
+    padding: 1.5rem;
+  }
+
+  .feedback-icon {
     font-size: 3rem;
+  }
+
+  .feedback-message {
+    font-size: 1.1rem;
   }
 }
 
 @media (max-width: 480px) {
-  .giant-upload-btn {
-    width: 250px;
-    height: 250px;
+  body {
+    padding: 0.5rem;
   }
-  
-  .btn-icon {
+
+  .character-card {
+    max-height: 250px;
+  }
+
+  .character-name {
+    font-size: 1.2rem;
+  }
+
+  .upload-card {
+    padding: 1rem;
+  }
+
+  .upload-card-icon {
     font-size: 3rem;
   }
-  
-  .btn-text {
-    font-size: 0.9rem;
+
+  .upload-card-title {
+    font-size: 1.3rem;
+  }
+
+  .upload-card-description {
+    font-size: 0.85rem;
   }
 }
 
+#video-input {
+  display: none;
+}

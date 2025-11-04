@@ -69,12 +69,36 @@ function renderUI() {
 
 function createUploadView() {
   return `
-    <div class="upload-container">
-      <input type="file" id="video-input" accept="video/*" />
-      <button id="upload-btn" class="giant-upload-btn">
-        <div class="btn-icon">📹</div>
-        <div class="btn-text">${TSUN_MESSAGES.idleButton}</div>
-      </button>
+    <div class="main-layout">
+      <!-- キャラクター画像カード -->
+      <div class="character-card">
+        <img src="https://ik.imagekit.io/FLATUPGYM/b9d4a676-0903-444c-91d2-50222dc3294f.png?updatedAt=1760340781490" 
+             alt="AIKA" 
+             class="character-image"
+             loading="eager" />
+        <div class="character-overlay">
+          <div class="character-name">AIKA18号</div>
+          <div class="character-subtitle">バトルスカウター</div>
+        </div>
+      </div>
+
+      <!-- アップロードカード -->
+      <div class="upload-card">
+        <input type="file" id="video-input" accept="video/*" />
+        <div class="upload-card-icon">📹</div>
+        <div class="upload-card-content">
+          <h2 class="upload-card-title">動画をアップロード</h2>
+          <p class="upload-card-description">
+            あなたのキックボクシング動画をアップロードして、AIKAがフォームを分析してあげるわ。
+          </p>
+        </div>
+        <button id="upload-btn" class="upload-card-button">
+          ${TSUN_MESSAGES.idleButton}
+        </button>
+        <div class="upload-card-hint">
+          <small>💡 100MB以下、20秒以内の動画を選択してください</small>
+        </div>
+      </div>
     </div>
   `;
 }
@@ -103,10 +127,10 @@ function createFeedbackView(override = {}) {
   ` : '';
 
   return `
-    <div class="feedback-container ${finalType}">
-      <div class="icon">${finalIcon}</div>
-      <div class="message">${finalMessage}</div>
-      ${finalSubMessage ? `<div class="sub-message">${finalSubMessage}</div>` : ''}
+    <div class="feedback-card ${finalType}">
+      <div class="feedback-icon">${finalIcon}</div>
+      <div class="feedback-message">${finalMessage}</div>
+      ${finalSubMessage ? `<div class="feedback-submessage">${finalSubMessage}</div>` : ''}
       ${progressHtml}
     </div>
   `;
@@ -227,7 +251,13 @@ async function handleUpload() {
       const message = TSUN_MESSAGES.uploading(Math.round(progress));
       const app = document.getElementById('app');
       if (app) {
-        app.innerHTML = createFeedbackView({ icon: '💭', message, type: 'processing', progress });
+        app.innerHTML = createFeedbackView({ 
+          icon: '💭', 
+          message, 
+          subMessage: 'アップロード中よ…',
+          type: 'processing', 
+          progress 
+        });
       }
     };
 
