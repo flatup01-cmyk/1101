@@ -312,7 +312,6 @@ def process_video(data, context):
         return {"status": "skipped", "reason": "not a video file", "file_path": file_path}
     
     # パストラバーサル攻撃対策
-    import os.path
     normalized_path = os.path.normpath(file_path)
     if not normalized_path.startswith('videos/'):
         logger.error(f"セキュリティ: 不正なパス: {file_path}")
