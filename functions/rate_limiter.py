@@ -37,8 +37,23 @@ def check_rate_limit(user_id, action_type):
             requests = doc_data.get(action_type, [])
             
         # 古いリクエストを削除
-        # タイムスタンプはFirestoreのTimestampオブジェクトなので、datetimeに変換して比較
-        requests = [req for req in requests if (current_time - req.to_datetime()) < timedelta(seconds=RATE_LIMIT_WINDOW_SECONDS)]
+        # タイムスタンプはFirestoreのTimestampオブジェクトまたはdatetimeオブジェクト
+        filtered_requests = []
+        for req in requests:
+            if isinstance(req, datetime):
+                req_time = req
+            elif hasattr(req, 'timestamp'):
+                # FirestoreのTimestampオブジェクトの場合
+                req_time = datetime.fromtimestamp(req.timestamp())
+            elif hasattr(req, 'seconds'):
+                # FirestoreのTimestampオブジェクト（古い形式）
+                req_time = datetime.fromtimestamp(req.seconds + req.nanos / 1e9)
+            else:
+                # 不明な形式はスキップ
+                continue
+            if (current_time - req_time) < timedelta(seconds=RATE_LIMIT_WINDOW_SECONDS):
+                filtered_requests.append(req)
+        requests = filtered_requests
         
         if len(requests) >= RATE_LIMIT_MAX_REQUESTS:
             return False, f"…チッ、アンタ、ちょっとやりすぎじゃない？1時間あたり${RATE_LIMIT_MAX_REQUESTS}回までよ。"

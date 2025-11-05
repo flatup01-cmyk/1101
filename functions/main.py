@@ -396,6 +396,7 @@ def process_video(data, context):
         # 【冪等性確保】アトミックトランザクションで処理済みチェック
         transaction = db.transaction()
         
+        @firestore.transactional
         def check_and_mark_processing(transaction):
             """アトミックトランザクションで処理済みチェック"""
             doc = processing_doc_ref.get(transaction=transaction)
@@ -427,7 +428,7 @@ def process_video(data, context):
             return True  # 新規処理
         
         try:
-            is_new = transaction.run(check_and_mark_processing)
+            is_new = check_and_mark_processing(transaction)
             if not is_new:
                 logger.info("⚠️ スキップ: 既に処理済みまたは処理中")
                 return {"status": "skipped", "reason": "already processed or processing"}
@@ -634,14 +635,30 @@ def process_video_trigger(cloud_event):
         
         # CloudEventの属性を取得（辞書形式とオブジェクト形式の両方に対応）
         if isinstance(cloud_event, dict):
-            event_type = cloud_event.get('type', 'unknown')
-            event_source = cloud_event.get('source', 'unknown')
+            event_type = cloud_event.get('type', cloud_event.get('attributes', {}).get('type', 'unknown'))
+            event_source = cloud_event.get('source', cloud_event.get('attributes', {}).get('source', 'unknown'))
             event_data = cloud_event.get('data', None)
         else:
-            # オブジェクト形式の場合
-            event_type = getattr(cloud_event, 'type', 'unknown')
-            event_source = getattr(cloud_event, 'source', 'unknown')
-            event_data = getattr(cloud_event, 'data', None)
+            # オブジェクト形式の場合（cloudevents.http.event.CloudEvent）
+            try:
+                # attributesから取得を試行
+                if hasattr(cloud_event, 'attributes'):
+                    attrs = cloud_event.attributes
+                    if isinstance(attrs, dict):
+                        event_type = attrs.get('type', 'unknown')
+                        event_source = attrs.get('source', 'unknown')
+                    else:
+                        event_type = getattr(attrs, 'type', getattr(cloud_event, 'type', 'unknown'))
+                        event_source = getattr(attrs, 'source', getattr(cloud_event, 'source', 'unknown'))
+                else:
+                    event_type = getattr(cloud_event, 'type', 'unknown')
+                    event_source = getattr(cloud_event, 'source', 'unknown')
+                event_data = getattr(cloud_event, 'data', None)
+            except Exception as attr_error:
+                logger.warning(f"⚠️ CloudEvent属性取得エラー: {attr_error}")
+                event_type = 'unknown'
+                event_source = 'unknown'
+                event_data = None
         
         logger.info(f"🔔 CloudEvent type: {event_type}")
         logger.info(f"🔔 CloudEvent source: {event_source}")
