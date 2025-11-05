@@ -17,6 +17,9 @@ import tempfile
 import base64
 import requests
 import logging
+import hashlib
+import traceback
+import cv2
 from datetime import datetime
 from google.cloud import storage, firestore
 from google.cloud.secretmanager_v1 import SecretManagerServiceClient
@@ -177,7 +180,6 @@ def call_dify_via_mcp(scores, user_id):
         return None
     except Exception as e:
         logger.error(f"❌ Dify MCP呼び出しエラー: {str(e)}")
-        import traceback
         traceback.print_exc()
         return None
 
@@ -307,7 +309,7 @@ def process_video(data, context):
                     return {"status": "error", "reason": "invalid data format"}
         
         file_path = data.get('name') or data.get('file')
-        bucket_name = data.get('bucket', os.environ.get('STORAGE_BUCKET', 'aikaapp-584fa.appspot.com'))
+        bucket_name = data.get('bucket', os.environ.get('STORAGE_BUCKET', 'aikaapp-584fa.firebasestorage.app'))
         
         logger.info(f"📁 処理開始: {file_path} (bucket: {bucket_name})")
     
@@ -365,7 +367,6 @@ def process_video(data, context):
         # 【冪等性確保】Firestoreで処理済みチェック
         logger.info(f"📁 冪等性チェック開始: jobId={job_id}")
         # jobIdが存在する場合はそれを使用、ない場合はファイルパスをハッシュ化
-        import hashlib
         if job_id:
             processing_doc_ref = db.collection('video_jobs').document(job_id)
             unique_id = job_id
@@ -415,7 +416,6 @@ def process_video(data, context):
             logger.info("📁 新規処理としてマーク完了")
         except Exception as e:
             logger.error(f"❌ トランザクション失敗: {str(e)}")
-            import traceback
             traceback.print_exc()
             return {"status": "error", "reason": "transaction failed"}
         
@@ -457,7 +457,6 @@ def process_video(data, context):
                 return {"status": "error", "reason": "file size too large"}
             
             # 動画の長さチェック（20秒制限）
-            import cv2
             cap = cv2.VideoCapture(temp_path)
             if not cap.isOpened():
                 logger.error(f"❌ 動画ファイルを開けません: {temp_path}")
@@ -559,7 +558,6 @@ def process_video(data, context):
             
         except Exception as e:
             logger.error(f"❌ エラー発生: {str(e)}")
-            import traceback
             logger.error(f"❌ トレースバック:\n{traceback.format_exc()}")
             
             # 【Cloud Logging連携】アラート送信
@@ -593,7 +591,6 @@ def process_video(data, context):
     
     except Exception as e:
         logger.error(f"❌ process_video実行エラー: {str(e)}")
-        import traceback
         logger.error(f"❌ トレースバック:\n{traceback.format_exc()}")
         return {"status": "error", "reason": str(e)}
 
@@ -610,7 +607,6 @@ if functions_framework:
         
         Storageにファイルが作成されると自動で呼ばれます
         """
-<<<<<<< HEAD
         # CloudEventオブジェクトの属性を安全に取得（辞書形式とオブジェクト形式の両方に対応）
         try:
             # タイプとソースを取得
@@ -679,7 +675,6 @@ if functions_framework:
                     return result
                 except Exception as process_error:
                     logger.error(f"❌ process_video実行エラー: {process_error}")
-                    import traceback
                     traceback.print_exc()
                     return {"status": "error", "reason": "processing error", "details": str(process_error)}
             else:
@@ -691,47 +686,8 @@ if functions_framework:
             logger.error(f"❌ CloudEvent処理エラー: {e}")
             logger.error(f"   CloudEvent型: {type(cloud_event)}")
             logger.error(f"   CloudEvent内容: {str(cloud_event)[:500]}")
-            import traceback
             traceback.print_exc()
             return {"status": "error", "reason": str(e)}
-=======
-        try:
-            logger.info("📥 受信データ: CloudEvent受信")
-            logger.info(f"📥 CloudEvent type: {cloud_event.get('type', 'unknown')}")
-            logger.info(f"📥 CloudEvent source: {cloud_event.get('source', 'unknown')}")
-            
-            # CloudEventからデータを抽出
-            event_data = cloud_event.data.get('data', {})
-            logger.info(f"📥 event_data type: {type(event_data)}")
-            logger.info(f"📥 event_data content: {str(event_data)[:200]}")  # 最初の200文字のみ
-            
-            # Base64デコードが必要な場合
-            if isinstance(event_data, str):
-                try:
-                    decoded_data = base64.b64decode(event_data).decode('utf-8')
-                    event_data = json.loads(decoded_data)
-                    logger.info("📥 Base64デコード成功")
-                except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as e:
-                    try:
-                        event_data = json.loads(event_data)
-                        logger.info("📥 JSON文字列としてパース成功")
-                    except json.JSONDecodeError:
-                        logger.error(f"⚠️ CloudEventデータのパースに失敗しました: {str(e)}")
-                        event_data = {}
-            
-            logger.info(f"📥 最終的なevent_data: {json.dumps(event_data, ensure_ascii=False, default=str)}")
-            
-            # process_video関数を呼び出し
-            result = process_video(event_data, None)
-            logger.info(f"✅ process_video実行完了: {json.dumps(result, ensure_ascii=False, default=str)}")
-            return result
-            
-        except Exception as e:
-            logger.error(f"❌ process_video_trigger実行エラー: {str(e)}")
-            import traceback
-            logger.error(f"❌ トレースバック:\n{traceback.format_exc()}")
-            raise
->>>>>>> c3a52b7 (fix: UnboundLocalError解消とデバッグログ追加)
 
 
 # テスト用（ローカル実行時）
