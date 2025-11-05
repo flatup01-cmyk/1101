@@ -27,10 +27,6 @@ from tenacity import retry, stop_after_attempt, wait_exponential, RetryError
 from analyze import analyze_kickboxing_form
 from rate_limiter import check_rate_limit
 
-# osモジュールをグローバルスコープで明示的に使用可能にする
-# 関数内でosという名前の変数を定義しないこと
-# 互換性のため、osとしても使用可能にする
-
 # Firebase Functions Framework
 import functions_framework
 
@@ -293,9 +289,6 @@ def process_video(data, context):
         data: イベントデータ（ファイル情報が入っている）
         context: イベントのメタデータ
     """
-    # osモジュールをグローバルスコープから参照（ローカル変数衝突を回避）
-    # 関数内でosという名前の変数を定義しないこと
-    
     try:
         logger.info("📁 process_video関数開始")
         logger.info(f"📁 受信データ型: {type(data)}")
@@ -316,6 +309,7 @@ def process_video(data, context):
                     return {"status": "error", "reason": "invalid data format"}
         
         file_path = data.get('name') or data.get('file')
+        bucket_name = data.get('bucket', os.environ.get('STORAGE_BUCKET', 'aikaapp-584fa.firebasestorage.app'))
         
         logger.info(f"📁 処理開始: {file_path} (bucket: {bucket_name})")
     
@@ -325,6 +319,8 @@ def process_video(data, context):
             return {"status": "skipped", "reason": "not a video file"}
     
         # パストラバーサル攻撃対策
+        # 注意: osはモジュールレベルで既にimportされているため、関数内でimport os.pathは不要
+        # 関数内でimport os.pathを実行すると、osがローカル変数として扱われ、UnboundLocalErrorが発生する
         normalized_path = os.path.normpath(file_path)
         if not normalized_path.startswith('videos/'):
             logger.error(f"❌ セキュリティ: 不正なパス: {file_path}")
@@ -617,9 +613,7 @@ if functions_framework:
             event_type = cloud_event.get('type') if isinstance(cloud_event, dict) else getattr(cloud_event, 'type', 'unknown')
             event_source = cloud_event.get('source') if isinstance(cloud_event, dict) else getattr(cloud_event, 'source', 'unknown')
             
-            logger.info(f"📥 受信データ: CloudEvent受信")
-            logger.info(f"📥 CloudEvent type: {event_type}")
-            logger.info(f"📥 CloudEvent source: {event_source}")
+            logger.info(f"🔔 CloudEvent受信: type={event_type}, source={event_source}")
             
             # CloudEventのdataフィールドを取得
             event_data = cloud_event.get('data') if isinstance(cloud_event, dict) else getattr(cloud_event, 'data', None)
