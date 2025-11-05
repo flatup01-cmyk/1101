@@ -295,7 +295,6 @@ def process_video(data, context):
     """
     # osモジュールをグローバルスコープから参照（ローカル変数衝突を回避）
     # 関数内でosという名前の変数を定義しないこと
-    import sys
     
     try:
         logger.info("📁 process_video関数開始")
@@ -326,7 +325,6 @@ def process_video(data, context):
             return {"status": "skipped", "reason": "not a video file"}
     
         # パストラバーサル攻撃対策
-        # _os_moduleを使用してosモジュールにアクセス（ローカル変数衝突を回避）
         normalized_path = os.path.normpath(file_path)
         if not normalized_path.startswith('videos/'):
             logger.error(f"❌ セキュリティ: 不正なパス: {file_path}")
