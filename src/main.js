@@ -361,9 +361,9 @@ function getVideoDuration(file) {
     // 60秒タイムアウト（モバイルでのメタデータ読み込み遅延に対応）
     timeoutId = setTimeout(() => {
       if (!hasResolved) {
-        console.warn('⏱️ Video metadata loading timeout after 60s');
-        cleanup();
-        reject(new Error('動画の読み込みがタイムアウトしました。ネットワーク環境を確認してください。'));
+      console.warn('⏱️ Video metadata loading timeout after 60s');
+      cleanup();
+      reject(new Error('動画の読み込みがタイムアウトしました。ネットワーク環境を確認してください。'));
       }
     }, 60000);
     
@@ -380,7 +380,7 @@ function getVideoDuration(file) {
       
       if (objectURL) {
         try {
-          window.URL.revokeObjectURL(objectURL);
+        window.URL.revokeObjectURL(objectURL);
         } catch (e) {
           // 無視
         }
@@ -453,7 +453,7 @@ function getVideoDuration(file) {
       console.error('❌ Error creating object URL:', error);
       cleanup();
       reject(new Error('動画ファイルの処理中にエラーが発生しました。'));
-    }
+  }
   });
 }
 
