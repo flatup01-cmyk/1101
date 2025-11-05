@@ -4,16 +4,57 @@
  * V.2.0 - Perfected by your partner.
  */
 
+/*
+ * AIKA-18 UI Revolution
+ * Concept: "Use it without thinking. And get hooked."
+ * V.2.0 - Perfected by your partner.
+ */
+
 :root {
+  /* ブランドカラー */
   --primary-brand-color: #ff6b9d; /* Tsundere Pink */
   --secondary-brand-color: #c44569; /* Deeper Pink */
   --accent-color: #64c8ff; /* Electric Blue */
+  
+  /* 背景グラデーション */
   --background-gradient-start: #2c1e38; /* Deep Purple */
   --background-gradient-end: #4a2a52; /* Lighter Purple */
+  
+  /* テキスト */
   --text-color: #ffffff;
   --text-shadow-color: rgba(0, 0, 0, 0.5);
+  
+  /* フォント */
   --font-main: 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
   --font-mono: 'Courier New', monospace;
+  
+  /* 統一されたカラー変数（後方互換性のため） */
+  --primary-color: var(--primary-brand-color);
+  --primary-dark: var(--secondary-brand-color);
+  --secondary-color: #64ff64;
+  --error-color: #ff6464;
+  --bg-dark: #0a0a0f;
+  --bg-card: rgba(255, 255, 255, 0.05);
+  --text-primary: var(--text-color);
+  --text-secondary: rgba(255, 255, 255, 0.8);
+  --shadow-glow: 0 20px 60px rgba(255, 107, 157, 0.4);
+  
+  /* LIFFスタイル変数 */
+  --liff-base-background-color: #FFFFFF;
+  --liff-base-text-color: #000000;
+  --liff-base-background-rgb-color: 255, 255, 255;
+  --liff-base-text-rgb-color: 0, 0, 0;
+  --liff-light-button-border-color: rgba(0, 0, 0, 0.15);
+  --liff-title-text-color: #111111;
+  --liff-title-background-color: #FFFFFF;
+  --liff-title-button-color: #111111;
+  --liff-icon-color: #111111;
+  --liff-status-bar-color: black;
+  --liff-title-subtext-color: #B7B7B7;
+  --liff-progress-bar-color: #06C755;
+  --liff-progress-background-color: #FFFFFF;
+  --liff-title-button-area-background-color: rgba(255, 255, 255, 0.12);
+  --liff-title-button-area-border-color: rgba(0, 0, 0, 0.15);
 }
 
 * {
