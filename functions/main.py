@@ -27,6 +27,12 @@ from tenacity import retry, stop_after_attempt, wait_exponential, RetryError
 from analyze import analyze_kickboxing_form
 from rate_limiter import check_rate_limit
 
+# osモジュールをグローバルスコープで明示的に使用可能にする
+# 関数内でosという名前の変数を定義しないこと
+import os as _os_module
+# 互換性のため、osとしても使用可能にする
+os = _os_module
+
 # Firebase Functions Framework
 import functions_framework
 
@@ -289,6 +295,11 @@ def process_video(data, context):
         data: イベントデータ（ファイル情報が入っている）
         context: イベントのメタデータ
     """
+    # osモジュールをグローバルスコープから参照（ローカル変数衝突を回避）
+    # 関数内でosという名前の変数を定義しないこと
+    import sys
+    _os_module = sys.modules['os']
+    
     try:
         logger.info("📁 process_video関数開始")
         logger.info(f"📁 受信データ型: {type(data)}")
@@ -309,7 +320,13 @@ def process_video(data, context):
                     return {"status": "error", "reason": "invalid data format"}
         
         file_path = data.get('name') or data.get('file')
+<<<<<<< HEAD
         bucket_name = data.get('bucket', os.environ.get('STORAGE_BUCKET', 'aikaapp-584fa.firebasestorage.app'))
+=======
+        # バケット名をイベントデータから優先取得、なければ環境変数から取得
+        # _os_moduleを使用してosモジュールにアクセス（ローカル変数衝突を回避）
+        bucket_name = data.get('bucket') or _os_module.environ.get('STORAGE_BUCKET', 'aikaapp-584fa.appspot.com')
+>>>>>>> 86ad0c0324825e6c6acc1fe66220cae9e8a9ac3e
         
         logger.info(f"📁 処理開始: {file_path} (bucket: {bucket_name})")
     
@@ -319,9 +336,8 @@ def process_video(data, context):
             return {"status": "skipped", "reason": "not a video file"}
     
         # パストラバーサル攻撃対策
-        # 注意: osはモジュールレベルで既にimportされているため、関数内でimport os.pathは不要
-        # 関数内でimport os.pathを実行すると、osがローカル変数として扱われ、UnboundLocalErrorが発生する
-        normalized_path = os.path.normpath(file_path)
+        # _os_moduleを使用してosモジュールにアクセス（ローカル変数衝突を回避）
+        normalized_path = _os_module.path.normpath(file_path)
         if not normalized_path.startswith('videos/'):
             logger.error(f"❌ セキュリティ: 不正なパス: {file_path}")
             return {"status": "error", "reason": "invalid path"}
@@ -432,7 +448,7 @@ def process_video(data, context):
                 logger.info(f"📁 ダウンロード完了: {temp_path}")
             
             # ファイルサイズチェック（100MB制限）
-            file_size = os.path.getsize(temp_path)
+            file_size = _os_module.path.getsize(temp_path)
             max_size = 100 * 1024 * 1024  # 100MB
             if file_size > max_size:
                 logger.error(f"❌ ファイルサイズ超過: {file_size / 1024 / 1024:.2f}MB > 100MB")
@@ -582,9 +598,9 @@ def process_video(data, context):
         
         finally:
             # 8. 一時ファイルを削除
-            if temp_path and os.path.exists(temp_path):
+            if temp_path and _os_module.path.exists(temp_path):
                 try:
-                    os.remove(temp_path)
+                    _os_module.remove(temp_path)
                     logger.info(f"📁 一時ファイル削除: {temp_path}")
                 except Exception as cleanup_error:
                     logger.error(f"❌ 一時ファイル削除エラー: {str(cleanup_error)}")
@@ -613,7 +629,9 @@ if functions_framework:
             event_type = cloud_event.get('type') if isinstance(cloud_event, dict) else getattr(cloud_event, 'type', 'unknown')
             event_source = cloud_event.get('source') if isinstance(cloud_event, dict) else getattr(cloud_event, 'source', 'unknown')
             
-            logger.info(f"🔔 CloudEvent受信: type={event_type}, source={event_source}")
+            logger.info(f"📥 受信データ: CloudEvent受信")
+            logger.info(f"📥 CloudEvent type: {event_type}")
+            logger.info(f"📥 CloudEvent source: {event_source}")
             
             # CloudEventのdataフィールドを取得
             event_data = cloud_event.get('data') if isinstance(cloud_event, dict) else getattr(cloud_event, 'data', None)
