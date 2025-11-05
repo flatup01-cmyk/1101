@@ -287,135 +287,149 @@ def process_video(data, context):
         data: イベントデータ（ファイル情報が入っている）
         context: イベントのメタデータ
     """
-    # 1. ファイル情報を取得
-    if isinstance(data, str):
-        try:
-            data = json.loads(base64.b64decode(data).decode('utf-8'))
-        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as e:
+    try:
+        logger.info("📁 process_video関数開始")
+        logger.info(f"📁 受信データ型: {type(data)}")
+        logger.info(f"📁 受信データ内容: {json.dumps(data, ensure_ascii=False, default=str) if isinstance(data, dict) else str(data)[:200]}")
+        
+        # 1. ファイル情報を取得
+        if isinstance(data, str):
+            logger.info("📁 データが文字列型です。パースを試みます...")
             try:
-                data = json.loads(data)
-            except json.JSONDecodeError:
-                logger.error(f"データパースエラー: {str(e)}")
-                return {"status": "error", "reason": "invalid data format"}
+                data = json.loads(base64.b64decode(data).decode('utf-8'))
+                logger.info("📁 Base64デコード→JSONパース成功")
+            except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as e:
+                try:
+                    data = json.loads(data)
+                    logger.info("📁 JSON文字列としてパース成功")
+                except json.JSONDecodeError:
+                    logger.error(f"❌ データパースエラー: {str(e)}")
+                    return {"status": "error", "reason": "invalid data format"}
+        
+        file_path = data.get('name') or data.get('file')
+        bucket_name = data.get('bucket', os.environ.get('STORAGE_BUCKET', 'aikaapp-584fa.appspot.com'))
+        
+        logger.info(f"📁 処理開始: {file_path} (bucket: {bucket_name})")
     
-    file_path = data.get('name') or data.get('file')
-    # バケット名をフロントエンドと統一（新しいFirebase Storage形式）
-    bucket_name = data.get('bucket', os.environ.get('STORAGE_BUCKET', 'aikaapp-584fa.firebasestorage.app'))
+        # videos/で始まらないファイルは無視
+        if not file_path or not file_path.startswith('videos/'):
+            logger.info(f"⚠️ スキップ: videos/で始まらないファイル: {file_path}")
+            return {"status": "skipped", "reason": "not a video file"}
     
-    logger.info(f"📥 受信データ: {json.dumps(data, ensure_ascii=False)}")
-    logger.info(f"📁 処理開始: file_path={file_path}, bucket={bucket_name}")
+        # パストラバーサル攻撃対策
+        # 注意: osはモジュールレベルで既にimportされているため、関数内でimport os.pathは不要
+        # 関数内でimport os.pathを実行すると、osがローカル変数として扱われ、UnboundLocalErrorが発生する
+        normalized_path = os.path.normpath(file_path)
+        if not normalized_path.startswith('videos/'):
+            logger.error(f"❌ セキュリティ: 不正なパス: {file_path}")
+            return {"status": "error", "reason": "invalid path"}
+        
+        # ファイルパスからユーザーIDとjobIdを抽出
+        # パス構造: videos/{userId}/{jobId}/{fileName}
+        path_parts = file_path.split('/')
+        if len(path_parts) < 4:
+            logger.error(f"❌ セキュリティ: パス構造が不正: {file_path}")
+            return {"status": "error", "reason": "invalid path structure"}
+        
+        user_id = path_parts[1]
+        job_id = path_parts[2] if len(path_parts) >= 3 else None
+        
+        logger.info(f"📁 ユーザーID抽出: {user_id}, JobID抽出: {job_id}")
+        
+        # ユーザーIDの検証
+        if not user_id or not user_id.replace('-', '').replace('_', '').isalnum():
+            logger.error(f"❌ セキュリティ: 不正なユーザーID: {user_id}")
+            return {"status": "error", "reason": "invalid user id"}
+        
+        # レートリミットチェック
+        logger.info(f"📁 レートリミットチェック開始: {user_id}")
+        is_allowed, rate_limit_message = check_rate_limit(user_id, 'upload_video')
+        if not is_allowed:
+            logger.warning(f"❌ レートリミット超過: {user_id} - {rate_limit_message}")
+            try:
+                # 簡易的なLINEメッセージ送信（エラーは無視）
+                LINE_CHANNEL_ACCESS_TOKEN = access_secret_version("LINE_CHANNEL_ACCESS_TOKEN", PROJECT_ID)
+                if LINE_CHANNEL_ACCESS_TOKEN:
+                    requests.post(
+                        'https://api.line.me/v2/bot/message/push',
+                        headers={'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}', 'Content-Type': 'application/json'},
+                        json={'to': user_id, 'messages': [{'type': 'text', 'text': f"ごめんあそばせ。{rate_limit_message}"}]},
+                        timeout=10
+                    )
+            except Exception as notify_error:
+                logger.error(f"レートリミット通知エラー: {str(notify_error)}")
+            return {"status": "rate_limit_exceeded", "reason": rate_limit_message}
+        
+        logger.info(f"✓ レートリミットチェック通過: {user_id}")
     
-    # videos/で始まらないファイルは無視
-    if not file_path or not file_path.startswith('videos/'):
-        logger.warning(f"⚠️ スキップ: videos/で始まらないファイル: {file_path}")
-        logger.warning(f"   完全なデータ: {json.dumps(data, ensure_ascii=False)}")
-        return {"status": "skipped", "reason": "not a video file", "file_path": file_path}
-    
-    # パストラバーサル攻撃対策
-    normalized_path = os.path.normpath(file_path)
-    if not normalized_path.startswith('videos/'):
-        logger.error(f"セキュリティ: 不正なパス: {file_path}")
-        return {"status": "error", "reason": "invalid path"}
-    
-    # ファイルパスからユーザーIDとjobIdを抽出
-    # パス構造: videos/{userId}/{jobId}/{fileName}
-    path_parts = file_path.split('/')
-    if len(path_parts) < 4:
-        logger.error(f"セキュリティ: パス構造が不正: {file_path}")
-        return {"status": "error", "reason": "invalid path structure"}
-    
-    user_id = path_parts[1]
-    job_id = path_parts[2] if len(path_parts) >= 3 else None
-    
-    # ユーザーIDの検証
-    if not user_id or not user_id.replace('-', '').replace('_', '').isalnum():
-        logger.error(f"セキュリティ: 不正なユーザーID: {user_id}")
-        return {"status": "error", "reason": "invalid user id"}
-    
-    # レートリミットチェック
-    is_allowed, rate_limit_message = check_rate_limit(user_id, 'upload_video')
-    if not is_allowed:
-        logger.warning(f"❌ レートリミット超過: {user_id} - {rate_limit_message}")
-        try:
-            # 簡易的なLINEメッセージ送信（エラーは無視）
-            LINE_CHANNEL_ACCESS_TOKEN = access_secret_version("LINE_CHANNEL_ACCESS_TOKEN", PROJECT_ID)
-            if LINE_CHANNEL_ACCESS_TOKEN:
-                requests.post(
-                    'https://api.line.me/v2/bot/message/push',
-                    headers={'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}', 'Content-Type': 'application/json'},
-                    json={'to': user_id, 'messages': [{'type': 'text', 'text': f"ごめんあそばせ。{rate_limit_message}"}]},
-                    timeout=10
-                )
-        except Exception as notify_error:
-            logger.error(f"レートリミット通知エラー: {str(notify_error)}")
-        return {"status": "rate_limit_exceeded", "reason": rate_limit_message}
-    
-    logger.info(f"✓ レートリミットチェック通過: {user_id}")
-    
-    # 【冪等性確保】Firestoreで処理済みチェック
-    # jobIdが存在する場合はそれを使用、ない場合はファイルパスをハッシュ化
-    import hashlib
-    if job_id:
-        processing_doc_ref = db.collection('video_jobs').document(job_id)
-        unique_id = job_id
-    else:
-        file_hash = hashlib.md5(file_path.encode()).hexdigest()
-        processing_doc_ref = db.collection('video_processing').document(file_hash)
-        unique_id = file_hash
-    
-    # 【冪等性確保】アトミックトランザクションで処理済みチェック
-    transaction = db.transaction()
-    
-    def check_and_mark_processing(transaction):
-        """アトミックトランザクションで処理済みチェック"""
-        doc = processing_doc_ref.get(transaction=transaction)
-        if doc.exists:
-            doc_data = doc.to_dict()
-            current_status = doc_data.get('status')
-            if current_status == 'completed':
-                logger.info(f"✅ 既に処理済み（冪等性確保）: {file_path}")
-                return False  # 処理済み→スキップ
-            elif current_status == 'processing':
-                logger.warning(f"⚠️ 処理中（重複実行防止）: {file_path}")
-                return False  # 処理中→スキップ
-        # 処理開始をマーク（アトミック）
+        # 【冪等性確保】Firestoreで処理済みチェック
+        logger.info(f"📁 冪等性チェック開始: jobId={job_id}")
+        # jobIdが存在する場合はそれを使用、ない場合はファイルパスをハッシュ化
+        import hashlib
         if job_id:
-            # video_jobsコレクションの場合
-            transaction.update(processing_doc_ref, {
-                'status': 'processing',
-                'updated_at': firestore.SERVER_TIMESTAMP
-            })
+            processing_doc_ref = db.collection('video_jobs').document(job_id)
+            unique_id = job_id
         else:
-            # video_processingコレクションの場合
-            transaction.set(processing_doc_ref, {
-                'status': 'processing',
-                'file_path': file_path,
-                'user_id': user_id,
-                'started_at': firestore.SERVER_TIMESTAMP,
-                'updated_at': firestore.SERVER_TIMESTAMP
-            })
-        return True  # 新規処理
-    
-    try:
-        is_new = transaction.run(check_and_mark_processing)
-        if not is_new:
-            return {"status": "skipped", "reason": "already processed or processing"}
-    except Exception as e:
-        logger.error(f"❌ トランザクション失敗: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return {"status": "error", "reason": "transaction failed"}
-    
-    # 2. 動画ファイルを一時ディレクトリにダウンロード
-    bucket = storage_client.bucket(bucket_name)
-    blob = bucket.blob(file_path)
-    
-    temp_path = None
-    try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as temp_file:
-            temp_path = temp_file.name
-            blob.download_to_filename(temp_path)
-            logger.info(f"ダウンロード完了: {temp_path}")
+            file_hash = hashlib.md5(file_path.encode()).hexdigest()
+            processing_doc_ref = db.collection('video_processing').document(file_hash)
+            unique_id = file_hash
+        
+        # 【冪等性確保】アトミックトランザクションで処理済みチェック
+        transaction = db.transaction()
+        
+        def check_and_mark_processing(transaction):
+            """アトミックトランザクションで処理済みチェック"""
+            doc = processing_doc_ref.get(transaction=transaction)
+            if doc.exists:
+                doc_data = doc.to_dict()
+                current_status = doc_data.get('status')
+                if current_status == 'completed':
+                    logger.info(f"✅ 既に処理済み（冪等性確保）: {file_path}")
+                    return False  # 処理済み→スキップ
+                elif current_status == 'processing':
+                    logger.warning(f"⚠️ 処理中（重複実行防止）: {file_path}")
+                    return False  # 処理中→スキップ
+            # 処理開始をマーク（アトミック）
+            if job_id:
+                # video_jobsコレクションの場合
+                transaction.update(processing_doc_ref, {
+                    'status': 'processing',
+                    'updated_at': firestore.SERVER_TIMESTAMP
+                })
+            else:
+                # video_processingコレクションの場合
+                transaction.set(processing_doc_ref, {
+                    'status': 'processing',
+                    'file_path': file_path,
+                    'user_id': user_id,
+                    'started_at': firestore.SERVER_TIMESTAMP,
+                    'updated_at': firestore.SERVER_TIMESTAMP
+                })
+            return True  # 新規処理
+        
+        try:
+            is_new = transaction.run(check_and_mark_processing)
+            if not is_new:
+                logger.info("⚠️ スキップ: 既に処理済みまたは処理中")
+                return {"status": "skipped", "reason": "already processed or processing"}
+            logger.info("📁 新規処理としてマーク完了")
+        except Exception as e:
+            logger.error(f"❌ トランザクション失敗: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {"status": "error", "reason": "transaction failed"}
+        
+        # 2. 動画ファイルを一時ディレクトリにダウンロード
+        logger.info(f"📁 動画ダウンロード開始: {file_path}")
+        bucket = storage_client.bucket(bucket_name)
+        blob = bucket.blob(file_path)
+        
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as temp_file:
+                temp_path = temp_file.name
+                blob.download_to_filename(temp_path)
+                logger.info(f"📁 ダウンロード完了: {temp_path}")
             
             # ファイルサイズチェック（100MB制限）
             file_size = os.path.getsize(temp_path)
@@ -484,92 +498,104 @@ def process_video(data, context):
             else:
                 logger.warning("⚠️ FPSが取得できませんでした。動画の長さチェックをスキップします。")
                 
-    except Exception as download_error:
-        logger.error(f"ファイルダウンロードエラー: {str(download_error)}")
-        processing_doc_ref.update({
-            'status': 'error',
-            'error_message': 'download failed',
-            'updated_at': firestore.SERVER_TIMESTAMP
-        })
-        return {"status": "error", "reason": "download failed"}
-    
-    try:
-        # 3. 動画解析を実行
-        analysis_result = analyze_kickboxing_form(temp_path)
-        logger.info(f"解析結果: {json.dumps(analysis_result, ensure_ascii=False)}")
-        
-        if analysis_result['status'] != 'success':
+        except Exception as download_error:
+            logger.error(f"❌ ファイルダウンロードエラー: {str(download_error)}")
             processing_doc_ref.update({
                 'status': 'error',
-                'error_message': analysis_result.get('error_message', 'analysis failed'),
+                'error_message': 'download failed',
                 'updated_at': firestore.SERVER_TIMESTAMP
             })
-            return analysis_result
+            return {"status": "error", "reason": "download failed"}
         
-        # 4. MCPスタイルでDify APIに送信してAIKAのセリフを生成
-        aika_message = call_dify_via_mcp(analysis_result['scores'], user_id)
-        
-        if not aika_message:
-            logger.warning("⚠️ Dify MCPからメッセージが取得できませんでした")
-            # デフォルトメッセージを使用
-            aika_message = "…別に、アンタの動画を解析してやってもいいけど？"
-        
-        # 5. LINE Messaging APIでユーザーに送信（指数関数的バックオフ・リトライ付き）
         try:
-            send_line_message_with_retry(user_id, aika_message, unique_id)
-        except Exception as send_error:
-            logger.error(f"❌ LINE送信エラー（リトライ後も失敗）: {str(send_error)}")
-            # エラーが発生しても処理は継続（ログに記録済み）
-        
-        # 【データ整合性】Firestoreを更新（分析結果とステータス）
-        processing_doc_ref.update({
-            'status': 'completed',
-            'analysis_result': analysis_result['scores'],
-            'aika_message': aika_message,
-            'completed_at': firestore.SERVER_TIMESTAMP,
-            'updated_at': firestore.SERVER_TIMESTAMP
-        })
-        
-        logger.info(f"✅ 処理完了: {file_path} (分析結果をFirestoreに保存)")
-        
-        return {
-            "status": "success",
-            "analysis": analysis_result['scores']
-        }
-        
-    except Exception as e:
-        logger.error(f"エラー発生: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        
-        # 【Cloud Logging連携】アラート送信
-        alert_payload = {
-            "severity": "ERROR",
-            "message": f"CRITICAL: 動画処理エラー - {file_path}",
-            "user_id": user_id,
-            "file_path": file_path,
-            "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        logger.error(json.dumps(alert_payload))
-        
-        # Firestoreを更新（エラー状態）
-        processing_doc_ref.update({
-            'status': 'error',
-            'error_message': str(e),
-            'updated_at': firestore.SERVER_TIMESTAMP
-        })
-        
-        return {"status": "failure", "error_message": str(e)}
-    
-    finally:
-        # 8. 一時ファイルを削除
-        if temp_path and os.path.exists(temp_path):
+            # 3. 動画解析を実行
+            logger.info(f"📁 動画解析開始: {temp_path}")
+            analysis_result = analyze_kickboxing_form(temp_path)
+            logger.info(f"📁 解析結果: {json.dumps(analysis_result, ensure_ascii=False)}")
+            
+            if analysis_result['status'] != 'success':
+                logger.error(f"❌ 解析失敗: {analysis_result.get('error_message', 'unknown error')}")
+                processing_doc_ref.update({
+                    'status': 'error',
+                    'error_message': analysis_result.get('error_message', 'analysis failed'),
+                    'updated_at': firestore.SERVER_TIMESTAMP
+                })
+                return analysis_result
+            
+            # 4. MCPスタイルでDify APIに送信してAIKAのセリフを生成
+            logger.info(f"📁 Dify API呼び出し開始: user_id={user_id}")
+            aika_message = call_dify_via_mcp(analysis_result['scores'], user_id)
+            
+            if not aika_message:
+                logger.warning("⚠️ Dify MCPからメッセージが取得できませんでした")
+                # デフォルトメッセージを使用
+                aika_message = "…別に、アンタの動画を解析してやってもいいけど？"
+            
+            # 5. LINE Messaging APIでユーザーに送信（指数関数的バックオフ・リトライ付き）
+            logger.info(f"📁 LINE送信開始: user_id={user_id}")
             try:
-                os.remove(temp_path)
-                logger.info(f"一時ファイル削除: {temp_path}")
-            except Exception as cleanup_error:
-                logger.error(f"一時ファイル削除エラー: {str(cleanup_error)}")
+                send_line_message_with_retry(user_id, aika_message, unique_id)
+                logger.info(f"✅ LINE送信成功: user_id={user_id}")
+            except Exception as send_error:
+                logger.error(f"❌ LINE送信エラー（リトライ後も失敗）: {str(send_error)}")
+                # エラーが発生しても処理は継続（ログに記録済み）
+            
+            # 【データ整合性】Firestoreを更新（分析結果とステータス）
+            logger.info(f"📁 Firestore更新開始: unique_id={unique_id}")
+            processing_doc_ref.update({
+                'status': 'completed',
+                'analysis_result': analysis_result['scores'],
+                'aika_message': aika_message,
+                'completed_at': firestore.SERVER_TIMESTAMP,
+                'updated_at': firestore.SERVER_TIMESTAMP
+            })
+            
+            logger.info(f"✅ 処理完了: {file_path} (分析結果をFirestoreに保存)")
+            
+            return {
+                "status": "success",
+                "analysis": analysis_result['scores']
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ エラー発生: {str(e)}")
+            import traceback
+            logger.error(f"❌ トレースバック:\n{traceback.format_exc()}")
+            
+            # 【Cloud Logging連携】アラート送信
+            alert_payload = {
+                "severity": "ERROR",
+                "message": f"CRITICAL: 動画処理エラー - {file_path}",
+                "user_id": user_id,
+                "file_path": file_path,
+                "error": str(e),
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            logger.error(json.dumps(alert_payload))
+            
+            # Firestoreを更新（エラー状態）
+            processing_doc_ref.update({
+                'status': 'error',
+                'error_message': str(e),
+                'updated_at': firestore.SERVER_TIMESTAMP
+            })
+            
+            return {"status": "failure", "error_message": str(e)}
+        
+        finally:
+            # 8. 一時ファイルを削除
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                    logger.info(f"📁 一時ファイル削除: {temp_path}")
+                except Exception as cleanup_error:
+                    logger.error(f"❌ 一時ファイル削除エラー: {str(cleanup_error)}")
+    
+    except Exception as e:
+        logger.error(f"❌ process_video実行エラー: {str(e)}")
+        import traceback
+        logger.error(f"❌ トレースバック:\n{traceback.format_exc()}")
+        return {"status": "error", "reason": str(e)}
 
 
 
@@ -584,6 +610,7 @@ if functions_framework:
         
         Storageにファイルが作成されると自動で呼ばれます
         """
+<<<<<<< HEAD
         # CloudEventオブジェクトの属性を安全に取得（辞書形式とオブジェクト形式の両方に対応）
         try:
             # タイプとソースを取得
@@ -667,6 +694,44 @@ if functions_framework:
             import traceback
             traceback.print_exc()
             return {"status": "error", "reason": str(e)}
+=======
+        try:
+            logger.info("📥 受信データ: CloudEvent受信")
+            logger.info(f"📥 CloudEvent type: {cloud_event.get('type', 'unknown')}")
+            logger.info(f"📥 CloudEvent source: {cloud_event.get('source', 'unknown')}")
+            
+            # CloudEventからデータを抽出
+            event_data = cloud_event.data.get('data', {})
+            logger.info(f"📥 event_data type: {type(event_data)}")
+            logger.info(f"📥 event_data content: {str(event_data)[:200]}")  # 最初の200文字のみ
+            
+            # Base64デコードが必要な場合
+            if isinstance(event_data, str):
+                try:
+                    decoded_data = base64.b64decode(event_data).decode('utf-8')
+                    event_data = json.loads(decoded_data)
+                    logger.info("📥 Base64デコード成功")
+                except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as e:
+                    try:
+                        event_data = json.loads(event_data)
+                        logger.info("📥 JSON文字列としてパース成功")
+                    except json.JSONDecodeError:
+                        logger.error(f"⚠️ CloudEventデータのパースに失敗しました: {str(e)}")
+                        event_data = {}
+            
+            logger.info(f"📥 最終的なevent_data: {json.dumps(event_data, ensure_ascii=False, default=str)}")
+            
+            # process_video関数を呼び出し
+            result = process_video(event_data, None)
+            logger.info(f"✅ process_video実行完了: {json.dumps(result, ensure_ascii=False, default=str)}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ process_video_trigger実行エラー: {str(e)}")
+            import traceback
+            logger.error(f"❌ トレースバック:\n{traceback.format_exc()}")
+            raise
+>>>>>>> c3a52b7 (fix: UnboundLocalError解消とデバッグログ追加)
 
 
 # テスト用（ローカル実行時）
