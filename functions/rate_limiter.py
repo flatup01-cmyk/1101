@@ -25,8 +25,6 @@ def check_rate_limit(user_id, action_type):
     # レートリミット情報を保存するコレクション
     rate_limit_ref = db.collection('rate_limits').document(user_id)
     
-    transaction = db.transaction()
-    
     @firestore.transactional
     def update_rate_limit_in_transaction(transaction, rate_limit_ref):
         doc = rate_limit_ref.get(transaction=transaction)
@@ -73,7 +71,7 @@ def check_rate_limit(user_id, action_type):
         return True, ""
         
     try:
-        is_allowed, message = update_rate_limit_in_transaction(transaction, rate_limit_ref)
+        is_allowed, message = update_rate_limit_in_transaction(rate_limit_ref)
         return is_allowed, message
     except Exception as e:
         print(f"レートリミットチェック中にエラーが発生しました: {e}")

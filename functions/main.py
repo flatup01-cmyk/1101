@@ -394,8 +394,6 @@ def process_video(data, context):
             unique_id = file_hash
         
         # 【冪等性確保】アトミックトランザクションで処理済みチェック
-        transaction = db.transaction()
-        
         @firestore.transactional
         def check_and_mark_processing(transaction, processing_doc_ref, job_id, file_path, user_id):
             """アトミックトランザクションで処理済みチェック"""
@@ -428,7 +426,7 @@ def process_video(data, context):
             return True  # 新規処理
         
         try:
-            is_new = check_and_mark_processing(transaction, processing_doc_ref, job_id, file_path, user_id)
+            is_new = check_and_mark_processing(processing_doc_ref, job_id, file_path, user_id)
             if not is_new:
                 logger.info("⚠️ スキップ: 既に処理済みまたは処理中")
                 return {"status": "skipped", "reason": "already processed or processing"}
@@ -635,13 +633,21 @@ def process_video_trigger(cloud_event):
         
         # CloudEventの属性を取得（辞書形式とオブジェクト形式の両方に対応）
         if isinstance(cloud_event, dict):
-            event_type = cloud_event.get('type', cloud_event.get('@type', 'unknown'))
-            event_source = cloud_event.get('source', cloud_event.get('@source', 'unknown'))
-            event_data = cloud_event.get('data', cloud_event.get('payload', None))
+            attributes = cloud_event.get('attributes', {})
+            if not isinstance(attributes, dict):
+                attributes = {}
+            event_type = attributes.get('type') or cloud_event.get('type', 'unknown')
+            event_source = attributes.get('source') or cloud_event.get('source', 'unknown')
+            event_data = cloud_event.get('data') or cloud_event.get('payload')
         else:
             # オブジェクト形式の場合
-            event_type = getattr(cloud_event, 'type', None) or getattr(cloud_event, '@type', 'unknown')
-            event_source = getattr(cloud_event, 'source', None) or getattr(cloud_event, '@source', 'unknown')
+            attributes = getattr(cloud_event, 'attributes', None)
+            if attributes and isinstance(attributes, dict):
+                event_type = attributes.get('type', 'unknown')
+                event_source = attributes.get('source', 'unknown')
+            else:
+                event_type = getattr(cloud_event, 'type', 'unknown')
+                event_source = getattr(cloud_event, 'source', 'unknown')
             event_data = getattr(cloud_event, 'data', None) or getattr(cloud_event, 'payload', None)
         
         logger.info(f"🔔 CloudEvent type: {event_type}")
