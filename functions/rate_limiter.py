@@ -37,23 +37,33 @@ def check_rate_limit(user_id, action_type):
             requests = doc_data.get(action_type, [])
             
         # 古いリクエストを削除
-        # タイムスタンプはFirestoreのTimestampオブジェクトまたはdatetimeオブジェクト
-        filtered_requests = []
+        def convert_to_datetime(value):
+            """サポートされるタイムスタンプ型をdatetimeに正規化"""
+            if isinstance(value, datetime):
+                return value
+            # Firestore Timestamp（DatetimeWithNanosecondsなど）
+            if hasattr(value, "timestamp") and callable(value.timestamp):
+                return datetime.fromtimestamp(value.timestamp())
+            # dict形式（seconds/nanos）
+            if hasattr(value, "seconds") and hasattr(value, "nanos"):
+                return datetime.fromtimestamp(value.seconds + value.nanos / 1e9)
+            # Epoch秒（int/float）
+            if isinstance(value, (int, float)):
+                return datetime.fromtimestamp(value)
+            # ISO8601文字列
+            if isinstance(value, str):
+                try:
+                    return datetime.fromisoformat(value)
+                except ValueError:
+                    return None
+            return None
+
+        normalized_requests = []
         for req in requests:
-            if isinstance(req, datetime):
-                req_time = req
-            elif hasattr(req, 'timestamp'):
-                # FirestoreのTimestampオブジェクトの場合
-                req_time = datetime.fromtimestamp(req.timestamp())
-            elif hasattr(req, 'seconds'):
-                # FirestoreのTimestampオブジェクト（古い形式）
-                req_time = datetime.fromtimestamp(req.seconds + req.nanos / 1e9)
-            else:
-                # 不明な形式はスキップ
-                continue
-            if (current_time - req_time) < timedelta(seconds=RATE_LIMIT_WINDOW_SECONDS):
-                filtered_requests.append(req)
-        requests = filtered_requests
+            normalized = convert_to_datetime(req)
+            if normalized and (current_time - normalized) < timedelta(seconds=RATE_LIMIT_WINDOW_SECONDS):
+                normalized_requests.append(req)
+        requests = normalized_requests
         
         if len(requests) >= RATE_LIMIT_MAX_REQUESTS:
             return False, f"…チッ、アンタ、ちょっとやりすぎじゃない？1時間あたり${RATE_LIMIT_MAX_REQUESTS}回までよ。"

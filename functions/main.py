@@ -397,7 +397,7 @@ def process_video(data, context):
         transaction = db.transaction()
         
         @firestore.transactional
-        def check_and_mark_processing(transaction):
+        def check_and_mark_processing(transaction, processing_doc_ref, job_id, file_path, user_id):
             """アトミックトランザクションで処理済みチェック"""
             doc = processing_doc_ref.get(transaction=transaction)
             if doc.exists:
@@ -428,7 +428,7 @@ def process_video(data, context):
             return True  # 新規処理
         
         try:
-            is_new = check_and_mark_processing(transaction)
+            is_new = check_and_mark_processing(transaction, processing_doc_ref, job_id, file_path, user_id)
             if not is_new:
                 logger.info("⚠️ スキップ: 既に処理済みまたは処理中")
                 return {"status": "skipped", "reason": "already processed or processing"}
@@ -635,50 +635,14 @@ def process_video_trigger(cloud_event):
         
         # CloudEventの属性を取得（辞書形式とオブジェクト形式の両方に対応）
         if isinstance(cloud_event, dict):
-            event_type = cloud_event.get('type', cloud_event.get('attributes', {}).get('type', 'unknown'))
-            event_source = cloud_event.get('source', cloud_event.get('attributes', {}).get('source', 'unknown'))
-            event_data = cloud_event.get('data', None)
+            event_type = cloud_event.get('type', cloud_event.get('@type', 'unknown'))
+            event_source = cloud_event.get('source', cloud_event.get('@source', 'unknown'))
+            event_data = cloud_event.get('data', cloud_event.get('payload', None))
         else:
-            # オブジェクト形式の場合（cloudevents.http.event.CloudEvent）
-            try:
-                # まず attributes プロパティから取得を試行
-                if hasattr(cloud_event, 'attributes'):
-                    attrs = cloud_event.attributes
-                    if isinstance(attrs, dict):
-                        event_type = attrs.get('type', 'unknown')
-                        event_source = attrs.get('source', 'unknown')
-                    else:
-                        # オブジェクト形式のattributes
-                        event_type = getattr(attrs, 'type', 'unknown')
-                        event_source = getattr(attrs, 'source', 'unknown')
-                # 次に、CloudEventオブジェクトの直接属性から取得を試行
-                elif hasattr(cloud_event, 'type'):
-                    event_type = cloud_event.type
-                    event_source = getattr(cloud_event, 'source', 'unknown')
-                else:
-                    # 辞書形式としてアクセスを試行
-                    try:
-                        event_type = cloud_event['type']
-                        event_source = cloud_event.get('source', 'unknown')
-                    except (TypeError, KeyError):
-                        event_type = 'unknown'
-                        event_source = 'unknown'
-                
-                # data属性の取得
-                if hasattr(cloud_event, 'data'):
-                    event_data = cloud_event.data
-                else:
-                    try:
-                        event_data = cloud_event.get('data', None) if isinstance(cloud_event, dict) else None
-                    except (TypeError, AttributeError):
-                        event_data = None
-                        
-            except Exception as attr_error:
-                logger.warning(f"⚠️ CloudEvent属性取得エラー: {attr_error}")
-                logger.warning(f"⚠️ CloudEvent属性取得エラー詳細: {traceback.format_exc()}")
-                event_type = 'unknown'
-                event_source = 'unknown'
-                event_data = None
+            # オブジェクト形式の場合
+            event_type = getattr(cloud_event, 'type', None) or getattr(cloud_event, '@type', 'unknown')
+            event_source = getattr(cloud_event, 'source', None) or getattr(cloud_event, '@source', 'unknown')
+            event_data = getattr(cloud_event, 'data', None) or getattr(cloud_event, 'payload', None)
         
         logger.info(f"🔔 CloudEvent type: {event_type}")
         logger.info(f"🔔 CloudEvent source: {event_source}")
@@ -775,124 +739,6 @@ def process_video_trigger(cloud_event):
         traceback.print_exc()
         logger.info("=" * 80)
         return {"status": "error", "reason": str(e)}
-        """
-        Firebase StorageのCloudEventトリガー（Cloud Storage v2仕様対応）
-        
-        Storageにファイルが作成されると自動で呼ばれます
-        """
-        # CloudEventオブジェクトの属性を安全に取得（辞書形式とオブジェクト形式の両方に対応）
-        try:
-            logger.info("=" * 80)
-            logger.info("🔔 CloudEvent受信開始")
-            logger.info(f"📦 CloudEvent全体の型: {type(cloud_event)}")
-            logger.info(f"📦 CloudEvent全体の内容（最初の1000文字）: {str(cloud_event)[:1000]}")
-            
-            # CloudEventの属性を取得（辞書形式とオブジェクト形式の両方に対応）
-            if isinstance(cloud_event, dict):
-                event_type = cloud_event.get('type', 'unknown')
-                event_source = cloud_event.get('source', 'unknown')
-                event_data = cloud_event.get('data', None)
-            else:
-                # オブジェクト形式の場合
-                event_type = getattr(cloud_event, 'type', 'unknown')
-                event_source = getattr(cloud_event, 'source', 'unknown')
-                event_data = getattr(cloud_event, 'data', None)
-            
-            logger.info(f"🔔 CloudEvent type: {event_type}")
-            logger.info(f"🔔 CloudEvent source: {event_source}")
-            logger.info(f"📦 CloudEvent.dataの型: {type(event_data)}")
-            
-            # CloudEvent.dataがNoneの場合の処理
-            if event_data is None:
-                logger.error("❌ CloudEvent.dataがNoneです")
-                # オブジェクト形式の場合、直接属性にアクセスを試行
-                if hasattr(cloud_event, 'data'):
-                    logger.info("📦 cloud_event.data属性を直接確認...")
-                    event_data = cloud_event.data
-                    logger.info(f"📦 直接取得したevent_dataの型: {type(event_data)}")
-                else:
-                    logger.error("❌ CloudEventにdata属性が見つかりません")
-                    return {"status": "error", "reason": "no data in cloud_event"}
-            
-            # デバッグログ: 実際のデータ構造を確認
-            if event_data:
-                logger.info(f"📦 CloudEvent.dataの内容（最初の1000文字）: {str(event_data)[:1000]}")
-            
-            # Cloud Storage v2仕様のCloudEventデータ構造を処理
-            # パターン1: Base64エンコードされたJSON文字列（最も一般的）
-            if isinstance(event_data, str):
-                logger.info("📦 event_dataは文字列型です。Base64デコードを試行...")
-                try:
-                    # Base64デコードを試行
-                    decoded_bytes = base64.b64decode(event_data)
-                    decoded_str = decoded_bytes.decode('utf-8')
-                    event_data = json.loads(decoded_str)
-                    logger.info("✅ Base64デコード成功")
-                    logger.info(f"📦 デコード後のevent_data: {json.dumps(event_data, ensure_ascii=False)}")
-                except Exception as decode_error:
-                    # Base64デコードに失敗した場合、JSON文字列として直接パースを試行
-                    logger.info("⚠️ Base64デコードに失敗。JSON文字列として直接パースを試行...")
-                    try:
-                        event_data = json.loads(event_data)
-                        logger.info("✅ JSON文字列として直接パース成功")
-                    except json.JSONDecodeError:
-                        logger.error(f"❌ CloudEventデータのデコードエラー: {decode_error}")
-                        logger.error(f"   データ（最初の500文字）: {event_data[:500] if len(event_data) > 500 else event_data}")
-                        return {"status": "error", "reason": "decode error", "details": str(decode_error)}
-            
-            # パターン2: 既に辞書形式
-            if isinstance(event_data, dict):
-                logger.info("📦 event_dataは辞書形式です。データを抽出...")
-                # バケット名とファイル名を取得（複数のキー名に対応）
-                bucket = event_data.get('bucket') or event_data.get('bucketId') or ''
-                name = event_data.get('name') or event_data.get('object') or event_data.get('file') or ''
-                
-                logger.info(f"📁 抽出されたデータ: bucket={bucket}, name={name}")
-                
-                if not bucket or not name:
-                    logger.error(f"❌ CloudEventデータが不完全: bucket={bucket}, name={name}")
-                    logger.error(f"   完全なevent_data: {json.dumps(event_data, ensure_ascii=False)}")
-                    logger.error(f"   利用可能なキー: {list(event_data.keys())}")
-                    return {"status": "error", "reason": "incomplete event data", "bucket": bucket, "name": name}
-                
-                # process_video関数に渡す形式に変換
-                video_data = {
-                    'bucket': bucket,
-                    'name': name
-                }
-                
-                logger.info(f"📁 処理対象ファイル: {name} (バケット: {bucket})")
-                
-                # パスの検証（事前チェック）
-                if not name.startswith('videos/'):
-                    logger.warning(f"⚠️ パスがvideos/で始まらない: {name}")
-                    logger.warning(f"   完全なevent_data: {json.dumps(event_data, ensure_ascii=False)}")
-                    return {"status": "skipped", "reason": "not a video file", "file_path": name}
-                
-                try:
-                    logger.info("🚀 process_video関数を呼び出します...")
-                    result = process_video(video_data, None)
-                    logger.info(f"✅ 処理完了: {json.dumps(result, ensure_ascii=False)}")
-                    logger.info("=" * 80)
-                    return result
-                except Exception as process_error:
-                    logger.error(f"❌ process_video実行エラー: {process_error}")
-                    traceback.print_exc()
-                    logger.info("=" * 80)
-                    return {"status": "error", "reason": "processing error", "details": str(process_error)}
-            else:
-                logger.error(f"❌ 予期しないCloudEventデータ形式: {type(event_data)}")
-                logger.error(f"   データ内容: {str(event_data)[:500]}")
-                logger.info("=" * 80)
-                return {"status": "error", "reason": "unexpected event data format", "type": str(type(event_data))}
-                    
-        except Exception as e:
-            logger.error(f"❌ CloudEvent処理エラー: {e}")
-            logger.error(f"   CloudEvent型: {type(cloud_event)}")
-            logger.error(f"   CloudEvent内容: {str(cloud_event)[:500]}")
-            traceback.print_exc()
-            logger.info("=" * 80)
-            return {"status": "error", "reason": str(e)}
 
 
 # テスト用（ローカル実行時）
