@@ -407,22 +407,23 @@ def process_video(data, context):
                 elif current_status == 'processing':
                     logger.warning(f"⚠️ 処理中（重複実行防止）: {file_path}")
                     return False  # 処理中→スキップ
-            # 処理開始をマーク（アトミック）
+
+            payload = {
+                'status': 'processing',
+                'file_path': file_path,
+                'user_id': user_id,
+                'updated_at': firestore.SERVER_TIMESTAMP
+            }
+            if not doc.exists:
+                payload['started_at'] = firestore.SERVER_TIMESTAMP
+
             if job_id:
-                # video_jobsコレクションの場合
-                transaction.update(processing_doc_ref, {
-                    'status': 'processing',
-                    'updated_at': firestore.SERVER_TIMESTAMP
-                })
+                if doc.exists:
+                    transaction.update(processing_doc_ref, payload)
+                else:
+                    transaction.set(processing_doc_ref, payload)
             else:
-                # video_processingコレクションの場合
-                transaction.set(processing_doc_ref, {
-                    'status': 'processing',
-                    'file_path': file_path,
-                    'user_id': user_id,
-                    'started_at': firestore.SERVER_TIMESTAMP,
-                    'updated_at': firestore.SERVER_TIMESTAMP
-                })
+                transaction.set(processing_doc_ref, payload)
             return True  # 新規処理
         
         try:
@@ -468,11 +469,11 @@ def process_video(data, context):
                 except Exception:
                     pass
                 # Firestoreを更新（エラー状態）
-                processing_doc_ref.update({
+                processing_doc_ref.set({
                     'status': 'error',
                     'error_message': 'file size too large',
                     'updated_at': firestore.SERVER_TIMESTAMP
-                })
+                }, merge=True)
                 return {"status": "error", "reason": "file size too large"}
             
             # 動画の長さチェック（20秒制限）
@@ -480,11 +481,11 @@ def process_video(data, context):
             if not cap.isOpened():
                 logger.error(f"❌ 動画ファイルを開けません: {temp_path}")
                 cap.release()
-                processing_doc_ref.update({
+                processing_doc_ref.set({
                     'status': 'error',
                     'error_message': 'cannot open video file',
                     'updated_at': firestore.SERVER_TIMESTAMP
-                })
+                }, merge=True)
                 return {"status": "error", "reason": "cannot open video file"}
             
             fps = cap.get(cv2.CAP_PROP_FPS)
@@ -507,22 +508,22 @@ def process_video(data, context):
                             )
                     except Exception:
                         pass
-                    processing_doc_ref.update({
+                    processing_doc_ref.set({
                         'status': 'error',
                         'error_message': 'video duration too long',
                         'updated_at': firestore.SERVER_TIMESTAMP
-                    })
+                    }, merge=True)
                     return {"status": "error", "reason": "video duration too long"}
             else:
                 logger.warning("⚠️ FPSが取得できませんでした。動画の長さチェックをスキップします。")
                 
         except Exception as download_error:
             logger.error(f"❌ ファイルダウンロードエラー: {str(download_error)}")
-            processing_doc_ref.update({
+            processing_doc_ref.set({
                 'status': 'error',
                 'error_message': 'download failed',
                 'updated_at': firestore.SERVER_TIMESTAMP
-            })
+            }, merge=True)
             return {"status": "error", "reason": "download failed"}
         
         try:
@@ -533,11 +534,11 @@ def process_video(data, context):
             
             if analysis_result['status'] != 'success':
                 logger.error(f"❌ 解析失敗: {analysis_result.get('error_message', 'unknown error')}")
-                processing_doc_ref.update({
+                processing_doc_ref.set({
                     'status': 'error',
                     'error_message': analysis_result.get('error_message', 'analysis failed'),
                     'updated_at': firestore.SERVER_TIMESTAMP
-                })
+                }, merge=True)
                 return analysis_result
             
             # 4. MCPスタイルでDify APIに送信してAIKAのセリフを生成
@@ -560,13 +561,13 @@ def process_video(data, context):
             
             # 【データ整合性】Firestoreを更新（分析結果とステータス）
             logger.info(f"📁 Firestore更新開始: unique_id={unique_id}")
-            processing_doc_ref.update({
+            processing_doc_ref.set({
                 'status': 'completed',
                 'analysis_result': analysis_result['scores'],
                 'aika_message': aika_message,
                 'completed_at': firestore.SERVER_TIMESTAMP,
                 'updated_at': firestore.SERVER_TIMESTAMP
-            })
+            }, merge=True)
             
             logger.info(f"✅ 処理完了: {file_path} (分析結果をFirestoreに保存)")
             
@@ -591,11 +592,11 @@ def process_video(data, context):
             logger.error(json.dumps(alert_payload))
             
             # Firestoreを更新（エラー状態）
-            processing_doc_ref.update({
+            processing_doc_ref.set({
                 'status': 'error',
                 'error_message': str(e),
                 'updated_at': firestore.SERVER_TIMESTAMP
-            })
+            }, merge=True)
             
             return {"status": "failure", "error_message": str(e)}
         
