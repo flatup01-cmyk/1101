@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from google.cloud import firestore
 
 db = firestore.Client()
@@ -20,7 +20,7 @@ def check_rate_limit(user_id, action_type):
         tuple: (is_allowed, message)
     """
     
-    current_time = datetime.now()
+    current_time = datetime.now(timezone.utc)
     
     # レートリミット情報を保存するコレクション
     rate_limit_ref = db.collection('rate_limits').document(user_id)
@@ -38,20 +38,21 @@ def check_rate_limit(user_id, action_type):
         def convert_to_datetime(value):
             """サポートされるタイムスタンプ型をdatetimeに正規化"""
             if isinstance(value, datetime):
-                return value
+                return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
             # Firestore Timestamp（DatetimeWithNanosecondsなど）
             if hasattr(value, "timestamp") and callable(value.timestamp):
-                return datetime.fromtimestamp(value.timestamp())
+                return datetime.fromtimestamp(value.timestamp(), tz=timezone.utc)
             # dict形式（seconds/nanos）
             if hasattr(value, "seconds") and hasattr(value, "nanos"):
-                return datetime.fromtimestamp(value.seconds + value.nanos / 1e9)
+                return datetime.fromtimestamp(value.seconds + value.nanos / 1e9, tz=timezone.utc)
             # Epoch秒（int/float）
             if isinstance(value, (int, float)):
-                return datetime.fromtimestamp(value)
+                return datetime.fromtimestamp(value, tz=timezone.utc)
             # ISO8601文字列
             if isinstance(value, str):
                 try:
-                    return datetime.fromisoformat(value)
+                    parsed = datetime.fromisoformat(value)
+                    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
                 except ValueError:
                     return None
             return None

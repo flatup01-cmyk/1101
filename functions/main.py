@@ -149,18 +149,19 @@ def call_dify_via_mcp(scores, user_id):
         
         # 実際にはDifyの標準APIを使用
         # MCPスタイルのデータを標準形式に変換
-        dify_payload = {
+        payload = {
+            'query': '動画解析結果をもとにAIKA18号として返答してください',
             'inputs': mcp_payload['params']['inputs'],
             'user': mcp_payload['params']['user'],
             'response_mode': mcp_payload['params']['response_mode']
         }
         
-        logger.info(f"📤 Dify MCP呼び出し: {json.dumps(dify_payload, ensure_ascii=False)}")
+        logger.info(f"📤 Dify MCP呼び出し: {json.dumps(payload, ensure_ascii=False)}")
         
         response = requests.post(
             DIFY_API_ENDPOINT,
             headers=headers,
-            json=dify_payload,
+            json=payload,
             timeout=30
         )
         
@@ -221,7 +222,7 @@ def send_line_message_with_retry(user_id, message, unique_id):
         LINE_CHANNEL_ACCESS_TOKEN = access_secret_version(
             "LINE_CHANNEL_ACCESS_TOKEN",
             PROJECT_ID
-        )
+        ).strip()
         
         if not LINE_CHANNEL_ACCESS_TOKEN:
             logger.error("❌ LINEアクセストークンが取得できませんでした")
@@ -369,6 +370,7 @@ def process_video(data, context):
                 # 簡易的なLINEメッセージ送信（エラーは無視）
                 LINE_CHANNEL_ACCESS_TOKEN = access_secret_version("LINE_CHANNEL_ACCESS_TOKEN", PROJECT_ID)
                 if LINE_CHANNEL_ACCESS_TOKEN:
+                    LINE_CHANNEL_ACCESS_TOKEN = LINE_CHANNEL_ACCESS_TOKEN.strip()
                     requests.post(
                         'https://api.line.me/v2/bot/message/push',
                         headers={'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}', 'Content-Type': 'application/json'},
@@ -460,6 +462,7 @@ def process_video(data, context):
                     # 簡易的なLINEメッセージ送信（エラーは無視）
                     LINE_CHANNEL_ACCESS_TOKEN = access_secret_version("LINE_CHANNEL_ACCESS_TOKEN", PROJECT_ID)
                     if LINE_CHANNEL_ACCESS_TOKEN:
+                        LINE_CHANNEL_ACCESS_TOKEN = LINE_CHANNEL_ACCESS_TOKEN.strip()
                         requests.post(
                             'https://api.line.me/v2/bot/message/push',
                             headers={'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}', 'Content-Type': 'application/json'},
@@ -500,6 +503,7 @@ def process_video(data, context):
                         # 簡易的なLINEメッセージ送信（エラーは無視）
                         LINE_CHANNEL_ACCESS_TOKEN = access_secret_version("LINE_CHANNEL_ACCESS_TOKEN", PROJECT_ID)
                         if LINE_CHANNEL_ACCESS_TOKEN:
+                            LINE_CHANNEL_ACCESS_TOKEN = LINE_CHANNEL_ACCESS_TOKEN.strip()
                             requests.post(
                                 'https://api.line.me/v2/bot/message/push',
                                 headers={'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}', 'Content-Type': 'application/json'},
