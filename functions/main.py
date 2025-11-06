@@ -426,7 +426,8 @@ def process_video(data, context):
             return True  # 新規処理
         
         try:
-            is_new = check_and_mark_processing(processing_doc_ref, job_id, file_path, user_id)
+            transaction = db.transaction()
+            is_new = check_and_mark_processing(transaction, processing_doc_ref, job_id, file_path, user_id)
             if not is_new:
                 logger.info("⚠️ スキップ: 既に処理済みまたは処理中")
                 return {"status": "skipped", "reason": "already processed or processing"}
