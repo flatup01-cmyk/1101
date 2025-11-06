@@ -641,21 +641,41 @@ def process_video_trigger(cloud_event):
         else:
             # オブジェクト形式の場合（cloudevents.http.event.CloudEvent）
             try:
-                # attributesから取得を試行
+                # まず attributes プロパティから取得を試行
                 if hasattr(cloud_event, 'attributes'):
                     attrs = cloud_event.attributes
                     if isinstance(attrs, dict):
                         event_type = attrs.get('type', 'unknown')
                         event_source = attrs.get('source', 'unknown')
                     else:
-                        event_type = getattr(attrs, 'type', getattr(cloud_event, 'type', 'unknown'))
-                        event_source = getattr(attrs, 'source', getattr(cloud_event, 'source', 'unknown'))
-                else:
-                    event_type = getattr(cloud_event, 'type', 'unknown')
+                        # オブジェクト形式のattributes
+                        event_type = getattr(attrs, 'type', 'unknown')
+                        event_source = getattr(attrs, 'source', 'unknown')
+                # 次に、CloudEventオブジェクトの直接属性から取得を試行
+                elif hasattr(cloud_event, 'type'):
+                    event_type = cloud_event.type
                     event_source = getattr(cloud_event, 'source', 'unknown')
-                event_data = getattr(cloud_event, 'data', None)
+                else:
+                    # 辞書形式としてアクセスを試行
+                    try:
+                        event_type = cloud_event['type']
+                        event_source = cloud_event.get('source', 'unknown')
+                    except (TypeError, KeyError):
+                        event_type = 'unknown'
+                        event_source = 'unknown'
+                
+                # data属性の取得
+                if hasattr(cloud_event, 'data'):
+                    event_data = cloud_event.data
+                else:
+                    try:
+                        event_data = cloud_event.get('data', None) if isinstance(cloud_event, dict) else None
+                    except (TypeError, AttributeError):
+                        event_data = None
+                        
             except Exception as attr_error:
                 logger.warning(f"⚠️ CloudEvent属性取得エラー: {attr_error}")
+                logger.warning(f"⚠️ CloudEvent属性取得エラー詳細: {traceback.format_exc()}")
                 event_type = 'unknown'
                 event_source = 'unknown'
                 event_data = None
