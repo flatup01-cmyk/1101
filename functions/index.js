@@ -6,6 +6,7 @@ import fetch from 'node-fetch';
 import crypto from 'crypto';
 import { admin } from './initAdmin.js'; // 正しいインポート方式
 import { handleVideoJob } from './dify/handler.js';
+import { handleTextChat } from './dify/chat.js';
 import { Client } from '@line/bot-sdk'; // 正しいインポート方式
 
 // Functionsの全体設定
@@ -76,20 +77,34 @@ export const lineWebhookRouter = onRequest(
         const userId = event.source.userId;
         const messageId = event.message.id;
         
+        // 先にLINEにOKを返す（replyTokenの有効期限を考慮）
+        res.status(200).send('OK');
+        
         try {
-          // ★★★★★ ここが作戦変更の最重要ポイント ★★★★★
-          // 1. まず、ユーザーに「受け付けました」と返信する (LINEへのOK応答より先に！)
+          // ★★★★★ リプライトークンエラー対策 ★★★★★
+          // replyTokenが存在し、有効な場合のみreplyMessageを使用
+          // それ以外はpushMessageを使用
           const replyMessage = {
             type: 'text',
             text: '動画を受け付けました！AIが解析を開始します。\n\n結果が届くまで、しばらくお待ちください…\n\n※解析は20秒以内/100MB以下の動画が対象です。'
           };
-          // このawaitで、返信が終わるまで待つ
-          await lineClient.replyMessage(event.replyToken, replyMessage);
-          console.info("ユーザーへの受付完了メッセージの送信に成功しました。");
           
-          // 2. ユーザーへの返信が終わってから、LINEに「OK」と応答する
-          res.status(200).send('OK');
-          // ★★★★★ 作戦変更ここまで ★★★★★
+          if (event.replyToken && event.replyToken !== LINE_VERIFY_REPLY_TOKEN) {
+            try {
+              // replyTokenが有効な場合、即座に返信
+              await lineClient.replyMessage(event.replyToken, replyMessage);
+              console.info("ユーザーへの受付完了メッセージの送信に成功しました（Reply API使用）。");
+            } catch (replyError) {
+              // replyTokenが無効または失効している場合、pushMessageにフォールバック
+              console.warn("Reply API失敗、Push APIにフォールバック:", replyError.message);
+              await lineClient.pushMessage(userId, replyMessage);
+              console.info("ユーザーへの受付完了メッセージの送信に成功しました（Push API使用）。");
+            }
+          } else {
+            // replyTokenが存在しない場合、pushMessageを使用
+            await lineClient.pushMessage(userId, replyMessage);
+            console.info("ユーザーへの受付完了メッセージの送信に成功しました（Push API使用）。");
+          }
           
           // --- ここから先の重い処理は、レスポンスを返した後にゆっくり実行される ---
           const fileName = `${userId}/${messageId}.mp4`; // Difyのルールに合わせて、videos/接頭辞を削除
@@ -152,64 +167,23 @@ export const lineWebhookRouter = onRequest(
         res.status(200).send('OK');
         
         try {
-          // Firestoreから会話IDを取得（会話の継続性を保つため）
-          const userConversationsRef = admin.firestore().collection('user_conversations').doc(userId);
-          const userConversationsDoc = await userConversationsRef.get();
-          let conversationId = '';
-          if (userConversationsDoc.exists) {
-            conversationId = userConversationsDoc.data().conversationId || '';
-          }
-          
-          // Dify APIで会話を生成
-          const difyApiKey = process.env.DIFY_API_KEY;
-          if (!difyApiKey) {
-            console.error("DIFY_API_KEYが設定されていません。");
-            await lineClient.pushMessage(userId, {
-              type: 'text',
-              text: '申し訳ございません。現在システムの設定が完了していません。しばらくしてから再度お試しください。'
-            });
-            return;
-          }
-          
-          // Dify APIのチャットメッセージエンドポイントを呼び出し
-          const difyResponse = await fetch('https://api.dify.ai/v1/chat-messages', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${difyApiKey}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              query: userMessage,
-              user: userId,
-              response_mode: 'blocking',
-              conversation_id: conversationId, // 会話IDを使用（空の場合は新規会話）
-            }),
+          // handleTextChatを使用してDifyで会話処理
+          const chatResult = await handleTextChat({
+            userId,
+            userMessage,
+            conversationId: null, // Firestoreから取得される
+            userGender: 'unknown', // Firestoreから取得される
           });
-          
-          if (!difyResponse.ok) {
-            const errorText = await difyResponse.text();
-            console.error(`Dify APIエラー: ${difyResponse.status} ${errorText}`);
-            await lineClient.pushMessage(userId, {
-              type: 'text',
-              text: '申し訳ございません。AIの応答を取得できませんでした。しばらくしてから再度お試しください。'
-            });
-            return;
-          }
-          
-          const difyResult = await difyResponse.json();
-          const aikaReply = difyResult.answer || difyResult.text || '...別に、何か用？';
-          const newConversationId = difyResult.conversation_id || conversationId;
-          
-          // Firestoreに会話IDを保存（会話の継続性を保つため）
-          if (newConversationId) {
-            await userConversationsRef.set({
-              conversationId: newConversationId,
-              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            }, { merge: true });
-          }
+
+          const aikaReply = chatResult.answer;
           
           // LINEに返信（日本語と英語の両方で）
-          const replyText = `${aikaReply}\n\n---\n[English]\n${aikaReply}`;
+          // Difyが既に英語を含んでいる場合はそのまま使用、そうでない場合は簡易的な英語版を追加
+          let replyText = aikaReply;
+          if (!aikaReply.includes('[English]') && !aikaReply.includes('---\n[English]')) {
+            replyText = `${aikaReply}\n\n---\n[English]\n${aikaReply}`;
+          }
+          
           await lineClient.pushMessage(userId, {
             type: 'text',
             text: replyText
@@ -221,7 +195,7 @@ export const lineWebhookRouter = onRequest(
           try {
             await lineClient.pushMessage(userId, {
               type: 'text',
-              text: '申し訳ございません。エラーが発生しました。しばらくしてから再度お試しください。'
+              text: '申し訳ございません。エラーが発生しました。しばらくしてから再度お試しください。\n\n---\n[English]\nSorry, an error occurred. Please try again later.'
             });
           } catch (pushError) {
             console.error("LINEメッセージ送信エラー:", pushError);

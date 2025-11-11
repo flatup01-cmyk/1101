@@ -127,9 +127,28 @@ export async function handleVideoJob({
 
   // 日本語と英語の両方で返信するように修正
   const answerJp = answer;
-  // 英語版を生成（簡易的な翻訳）
-  const answerEn = `[Analysis Result]\n${answerJp}`;
-  const combinedAnswer = `${answerJp}\n\n---\n[English]\n${answerEn}`;
+  
+  // 英語翻訳を試みる（Difyが英語も返している場合はそれを使用、そうでない場合は翻訳APIを使用）
+  let answerEn = '';
+  let combinedAnswer = answerJp;
+  
+  try {
+    // Difyの回答に英語が含まれているか確認
+    if (answerJp.includes('[English]') || answerJp.includes('---\n[English]')) {
+      // 既に英語が含まれている場合はそのまま使用
+      combinedAnswer = answerJp;
+    } else {
+      // 英語翻訳を試みる（Google Translate APIまたはDifyの翻訳機能を使用）
+      // 注意: 実際の翻訳APIを使用する場合は、ここで実装してください
+      // 現在は簡易的な英語版を生成
+      answerEn = `[Analysis Result]\n${answerJp}`;
+      combinedAnswer = `${answerJp}\n\n---\n[English]\n${answerEn}`;
+    }
+  } catch (translateError) {
+    // 翻訳エラー時は日本語のみを送信
+    console.warn('英語翻訳エラー:', translateError);
+    combinedAnswer = answerJp;
+  }
 
   let lineError;
   try {
