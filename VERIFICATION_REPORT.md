@@ -205,3 +205,6 @@ if (event.type === 'message' && event.message.type === 'video') {
 **検証者**: AI Assistant
 **状態**: ⚠️ 一部修正が必要
 
+
+
+
