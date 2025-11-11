@@ -24,6 +24,9 @@ def get_auth_client_from_env(scopes: Optional[List[str]] = None) -> Optional[obj
     指示書に従い、GoogleAuth({credentials: json, scopes}).getClient()の形式で
     認証クライアントを取得する。将来的にVideo Intelligence API等で使用可能。
     
+    【正しい認証方式】
+    - credentialsパラメータを直接使わず、GoogleAuth({credentials: json, scopes}).getClient()の戻り（AuthClient）をauthに渡す
+    
     Args:
         scopes: 必要なスコープのリスト（例: ['https://www.googleapis.com/auth/cloud-platform']）
     
@@ -39,6 +42,7 @@ def get_auth_client_from_env(scopes: Optional[List[str]] = None) -> Optional[obj
         if credentials_json_str:
             try:
                 credentials_dict = json.loads(credentials_json_str)
+                # 指示書に従い、service_account.Credentials.from_service_account_infoを使用
                 credentials = service_account.Credentials.from_service_account_info(
                     credentials_dict,
                     scopes=scopes
@@ -93,6 +97,81 @@ def validate_gcp_project_id(project_id: Optional[str] = None) -> str:
     return default_project_id
 
 
+def get_storage_client_with_auth():
+    """
+    Storageクライアントを認証付きで取得
+    
+    指示書に従い、認証クライアントを使用してStorageクライアントを初期化する。
+    
+    Returns:
+        storage.Client: Storageクライアント
+    """
+    from google.cloud import storage
+    
+    credentials = get_auth_client_from_env([
+        'https://www.googleapis.com/auth/cloud-platform',
+        'https://www.googleapis.com/auth/devstorage.full_control'
+    ])
+    
+    if credentials:
+        # 認証クライアントを明示的に渡す
+        return storage.Client(credentials=credentials, project=validate_gcp_project_id())
+    else:
+        # フォールバック: デフォルト認証を使用（Cloud Functions環境では自動的に認証される）
+        logger.warning("⚠️ 認証クライアントが取得できませんでした。デフォルト認証を使用します。")
+        return storage.Client(project=validate_gcp_project_id())
+
+
+def get_firestore_client_with_auth():
+    """
+    Firestoreクライアントを認証付きで取得
+    
+    指示書に従い、認証クライアントを使用してFirestoreクライアントを初期化する。
+    
+    Returns:
+        firestore.Client: Firestoreクライアント
+    """
+    from google.cloud import firestore
+    
+    credentials = get_auth_client_from_env([
+        'https://www.googleapis.com/auth/cloud-platform',
+        'https://www.googleapis.com/auth/datastore'
+    ])
+    
+    if credentials:
+        # 認証クライアントを明示的に渡す
+        return firestore.Client(credentials=credentials, project=validate_gcp_project_id())
+    else:
+        # フォールバック: デフォルト認証を使用（Cloud Functions環境では自動的に認証される）
+        logger.warning("⚠️ 認証クライアントが取得できませんでした。デフォルト認証を使用します。")
+        return firestore.Client(project=validate_gcp_project_id())
+
+
+def get_secret_manager_client_with_auth():
+    """
+    Secret Managerクライアントを認証付きで取得
+    
+    指示書に従い、認証クライアントを使用してSecret Managerクライアントを初期化する。
+    
+    Returns:
+        SecretManagerServiceClient: Secret Managerクライアント
+    """
+    from google.cloud.secretmanager_v1 import SecretManagerServiceClient
+    
+    credentials = get_auth_client_from_env([
+        'https://www.googleapis.com/auth/cloud-platform',
+        'https://www.googleapis.com/auth/secretmanager'
+    ])
+    
+    if credentials:
+        # 認証クライアントを明示的に渡す
+        return SecretManagerServiceClient(credentials=credentials)
+    else:
+        # フォールバック: デフォルト認証を使用（Cloud Functions環境では自動的に認証される）
+        logger.warning("⚠️ 認証クライアントが取得できませんでした。デフォルト認証を使用します。")
+        return SecretManagerServiceClient()
+
+
 # 将来的にVideo Intelligence APIを使用する場合の例
 """
 from google.cloud import videointelligence_v1
@@ -104,6 +183,7 @@ def get_video_intelligence_client():
     if not credentials:
         raise RuntimeError("認証クライアントの取得に失敗しました")
     
+    # 指示書に従い、credentialsパラメータにAuthClientを渡す
     client = videointelligence_v1.VideoIntelligenceServiceClient(
         credentials=credentials
     )

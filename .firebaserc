@@ -1,6 +1,9 @@
 {
   "projects": {
-    "default": "aikaapp-584fa"
-  }
+    "default": "aikaapp-584fa",
+    "firebase use --add": "aikaapp-584fa",
+    "cd functions": "aikaapp-584fa"
+  },
+  "targets": {},
+  "etags": {}
 }
-

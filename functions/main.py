@@ -26,6 +26,12 @@ from google.cloud.secretmanager_v1 import SecretManagerServiceClient
 from tenacity import retry, stop_after_attempt, wait_exponential, RetryError
 from analyze import analyze_kickboxing_form
 from rate_limiter import check_rate_limit
+from gcloud_auth import (
+    get_storage_client_with_auth,
+    get_firestore_client_with_auth,
+    get_secret_manager_client_with_auth,
+    validate_gcp_project_id
+)
 
 # Firebase Functions Framework
 import functions_framework
@@ -40,24 +46,37 @@ storage_client = None
 db = None
 
 def get_storage_client():
-    """Storageクライアントを取得（遅延初期化）"""
+    """
+    Storageクライアントを取得（遅延初期化）
+    
+    指示書に従い、認証ユーティリティを使用してクライアントを初期化する。
+    """
     global storage_client
     if storage_client is None:
-        storage_client = storage.Client()
+        storage_client = get_storage_client_with_auth()
     return storage_client
 
 def get_firestore_client():
-    """Firestoreクライアントを取得（遅延初期化）"""
+    """
+    Firestoreクライアントを取得（遅延初期化）
+    
+    指示書に従い、認証ユーティリティを使用してクライアントを初期化する。
+    """
     global db
     if db is None:
-        db = firestore.Client()
+        db = get_firestore_client_with_auth()
     return db
 
 _secret_client = None
 def get_secret_client():
+    """
+    Secret Managerクライアントを取得（遅延初期化）
+    
+    指示書に従い、認証ユーティリティを使用してクライアントを初期化する。
+    """
     global _secret_client
     if _secret_client is None:
-        _secret_client = SecretManagerServiceClient()
+        _secret_client = get_secret_manager_client_with_auth()
     return _secret_client
 
 # --- Secret Manager Access Function ---
@@ -83,7 +102,8 @@ def access_secret_version(secret_id, project_id, version_id="latest"):
         raise
 
 # --- Load Secrets at Runtime ---
-PROJECT_ID = os.environ.get('GCP_PROJECT', 'aikaapp-584fa')
+# 指示書に従い、プロジェクトID検証ユーティリティを使用
+PROJECT_ID = validate_gcp_project_id()
 
 # LINEアクセストークンはSecret Managerから読み込み（最優先・セキュリティ強化）
 
@@ -200,6 +220,65 @@ def call_dify_via_mcp(scores, user_id):
         return None
 
 
+def send_line_message_simple(user_id, message):
+    """
+    LINE Messaging APIでメッセージを送信（簡易版・エラーハンドリングなし）
+    
+    【正しいpushリクエスト構造】
+    - Authorizationヘッダー: Bearer <チャネルアクセストークン>（半角スペース1つ）
+    - Content-Typeヘッダー: application/json
+    - 本文: {"to": "<ユーザーID>", "messages": [{"type": "text", "text": "メッセージ内容"}]}
+    
+    Args:
+        user_id: LINEユーザーID
+        message: 送信するメッセージテキスト
+    
+    Returns:
+        bool: 成功した場合True、失敗した場合False（例外は発生させない）
+    """
+    try:
+        # Secret ManagerからLINEアクセストークンを取得（バージョン4で固定）
+        # 本番運用の安定性のため、バージョン4を固定参照
+        LINE_CHANNEL_ACCESS_TOKEN = access_secret_version(
+            "LINE_CHANNEL_ACCESS_TOKEN",
+            PROJECT_ID,
+            version_id="4"  # バージョン4に固定（2025-11-08作成）
+        ).strip()
+        
+        if not LINE_CHANNEL_ACCESS_TOKEN:
+            logger.error("❌ LINEアクセストークンが取得できませんでした")
+            return False
+        
+        # LINE API push エンドポイント
+        url = 'https://api.line.me/v2/bot/message/push'
+        
+        # 【必須】Authorizationヘッダー: Bearer <トークン>（半角スペース1つ）
+        headers = {
+            'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}',
+            'Content-Type': 'application/json'
+        }
+        
+        # 【必須】リクエスト本文: to（ユーザーID）とmessages（配列）を含む
+        data = {
+            'to': user_id,
+            'messages': [
+                {
+                    'type': 'text',
+                    'text': message
+                }
+            ]
+        }
+        
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        response.raise_for_status()
+        logger.info(f"✅ LINEメッセージ送信成功: {user_id}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ LINEメッセージ送信エラー: {str(e)}")
+        return False
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=10),
@@ -208,6 +287,11 @@ def call_dify_via_mcp(scores, user_id):
 def send_line_message_with_retry(user_id, message, unique_id):
     """
     LINE Messaging APIでメッセージを送信（指数関数的バックオフ・リトライ付き）
+    
+    【正しいpushリクエスト構造】
+    - Authorizationヘッダー: Bearer <チャネルアクセストークン>（半角スペース1つ）
+    - Content-Typeヘッダー: application/json
+    - 本文: {"to": "<ユーザーID>", "messages": [{"type": "text", "text": "メッセージ内容"}]}
     
     Args:
         user_id: ユーザーID
@@ -218,10 +302,12 @@ def send_line_message_with_retry(user_id, message, unique_id):
         bool: 成功した場合True
     """
     try:
-        # Secret ManagerからLINEアクセストークンを取得
+        # Secret ManagerからLINEアクセストークンを取得（バージョン4で固定）
+        # 本番運用の安定性のため、バージョン4を固定参照
         LINE_CHANNEL_ACCESS_TOKEN = access_secret_version(
             "LINE_CHANNEL_ACCESS_TOKEN",
-            PROJECT_ID
+            PROJECT_ID,
+            version_id="4"  # バージョン4に固定（2025-11-08作成）
         ).strip()
         
         if not LINE_CHANNEL_ACCESS_TOKEN:
@@ -237,12 +323,16 @@ def send_line_message_with_retry(user_id, message, unique_id):
                 logger.info(f"⏭️ 既に通知済み: {unique_id}")
                 return True
         
-        # LINE APIに送信
+        # LINE API push エンドポイント
         url = 'https://api.line.me/v2/bot/message/push'
+        
+        # 【必須】Authorizationヘッダー: Bearer <トークン>（半角スペース1つ）
         headers = {
             'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}',
             'Content-Type': 'application/json'
         }
+        
+        # 【必須】リクエスト本文: to（ユーザーID）とmessages（配列）を含む
         data = {
             'to': user_id,
             'messages': [
@@ -361,24 +451,33 @@ def process_video(data, context):
             logger.error(f"❌ セキュリティ: 不正なユーザーID: {user_id}")
             return {"status": "error", "reason": "invalid user id"}
         
+        # FirestoreからLINEユーザーIDを取得
+        line_user_id = None
+        if job_id:
+            try:
+                db = get_firestore_client()
+                job_doc = db.collection('video_jobs').document(job_id).get()
+                if job_doc.exists:
+                    job_data = job_doc.to_dict()
+                    line_user_id = job_data.get('lineUserId')
+                    logger.info(f"📁 LINEユーザーID取得: {line_user_id}")
+                else:
+                    logger.warning(f"⚠️ FirestoreにjobId={job_id}のドキュメントが見つかりません")
+            except Exception as e:
+                logger.error(f"❌ FirestoreからLINEユーザーID取得エラー: {str(e)}")
+        
+        if not line_user_id:
+            logger.error(f"❌ LINEユーザーIDが取得できませんでした (jobId={job_id})")
+            return {"status": "error", "reason": "line user id not found"}
+        
         # レートリミットチェック
         logger.info(f"📁 レートリミットチェック開始: {user_id}")
         is_allowed, rate_limit_message = check_rate_limit(user_id, 'upload_video')
         if not is_allowed:
             logger.warning(f"❌ レートリミット超過: {user_id} - {rate_limit_message}")
-            try:
-                # 簡易的なLINEメッセージ送信（エラーは無視）
-                LINE_CHANNEL_ACCESS_TOKEN = access_secret_version("LINE_CHANNEL_ACCESS_TOKEN", PROJECT_ID)
-                if LINE_CHANNEL_ACCESS_TOKEN:
-                    LINE_CHANNEL_ACCESS_TOKEN = LINE_CHANNEL_ACCESS_TOKEN.strip()
-                    requests.post(
-                        'https://api.line.me/v2/bot/message/push',
-                        headers={'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}', 'Content-Type': 'application/json'},
-                        json={'to': user_id, 'messages': [{'type': 'text', 'text': f"ごめんあそばせ。{rate_limit_message}"}]},
-                        timeout=10
-                    )
-            except Exception as notify_error:
-                logger.error(f"レートリミット通知エラー: {str(notify_error)}")
+            # 簡易的なLINEメッセージ送信（エラーは無視）
+            if line_user_id:
+                send_line_message_simple(line_user_id, f"ごめんあそばせ。{rate_limit_message}")
             return {"status": "rate_limit_exceeded", "reason": rate_limit_message}
         
         logger.info(f"✓ レートリミットチェック通過: {user_id}")
@@ -458,23 +557,16 @@ def process_video(data, context):
             max_size = 100 * 1024 * 1024  # 100MB
             if file_size > max_size:
                 logger.error(f"❌ ファイルサイズ超過: {file_size / 1024 / 1024:.2f}MB > 100MB")
-                try:
-                    # 簡易的なLINEメッセージ送信（エラーは無視）
-                    LINE_CHANNEL_ACCESS_TOKEN = access_secret_version("LINE_CHANNEL_ACCESS_TOKEN", PROJECT_ID)
-                    if LINE_CHANNEL_ACCESS_TOKEN:
-                        LINE_CHANNEL_ACCESS_TOKEN = LINE_CHANNEL_ACCESS_TOKEN.strip()
-                        requests.post(
-                            'https://api.line.me/v2/bot/message/push',
-                            headers={'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}', 'Content-Type': 'application/json'},
-                            json={'to': user_id, 'messages': [{'type': 'text', 'text': "ごめんあそばせ。動画ファイルが大きすぎるわ（100MB以下に収めて）。"}]},
-                            timeout=10
-                        )
-                except Exception:
-                    pass
+                # 簡易的なLINEメッセージ送信（エラーは無視）
+                if line_user_id:
+                    file_size_mb = file_size / 1024 / 1024
+                    error_message = f"…チッ、動画ファイルが大きすぎるわよ！今の動画は{file_size_mb:.1f}MBじゃない。100MB以下に収めなさい。\n\n---\n[English]\nThe video file is too large ({file_size_mb:.1f}MB). Please keep it under 100MB."
+                    send_line_message_simple(line_user_id, error_message)
                 # Firestoreを更新（エラー状態）
                 processing_doc_ref.set({
                     'status': 'error',
                     'error_message': 'file size too large',
+                    'file_size_mb': file_size / 1024 / 1024,
                     'updated_at': firestore.SERVER_TIMESTAMP
                 }, merge=True)
                 return {"status": "error", "reason": "file size too large"}
@@ -499,22 +591,14 @@ def process_video(data, context):
                 duration = frame_count / fps
                 if duration > 20:
                     logger.error(f"❌ 動画の長さ超過: {duration:.2f}秒 > 20秒")
-                    try:
-                        # 簡易的なLINEメッセージ送信（エラーは無視）
-                        LINE_CHANNEL_ACCESS_TOKEN = access_secret_version("LINE_CHANNEL_ACCESS_TOKEN", PROJECT_ID)
-                        if LINE_CHANNEL_ACCESS_TOKEN:
-                            LINE_CHANNEL_ACCESS_TOKEN = LINE_CHANNEL_ACCESS_TOKEN.strip()
-                            requests.post(
-                                'https://api.line.me/v2/bot/message/push',
-                                headers={'Authorization': f'Bearer {LINE_CHANNEL_ACCESS_TOKEN}', 'Content-Type': 'application/json'},
-                                json={'to': user_id, 'messages': [{'type': 'text', 'text': "ごめんあそばせ。動画が長すぎるわ（20秒以内に収めて）。"}]},
-                                timeout=10
-                            )
-                    except Exception:
-                        pass
+                    # 簡易的なLINEメッセージ送信（エラーは無視）
+                    if line_user_id:
+                        error_message = f"…チッ、動画が長すぎるわよ！今の動画は{duration:.1f}秒じゃない。20秒以内に収めなさい。\n\n---\n[English]\nThe video is too long ({duration:.1f} seconds). Please keep it under 20 seconds."
+                        send_line_message_simple(line_user_id, error_message)
                     processing_doc_ref.set({
                         'status': 'error',
                         'error_message': 'video duration too long',
+                        'video_duration': duration,
                         'updated_at': firestore.SERVER_TIMESTAMP
                     }, merge=True)
                     return {"status": "error", "reason": "video duration too long"}
@@ -546,19 +630,27 @@ def process_video(data, context):
                 return analysis_result
             
             # 4. MCPスタイルでDify APIに送信してAIKAのセリフを生成
-            logger.info(f"📁 Dify API呼び出し開始: user_id={user_id}")
-            aika_message = call_dify_via_mcp(analysis_result['scores'], user_id)
+            logger.info(f"📁 Dify API呼び出し開始: line_user_id={line_user_id}")
+            aika_message = call_dify_via_mcp(analysis_result['scores'], line_user_id)
             
             if not aika_message:
                 logger.warning("⚠️ Dify MCPからメッセージが取得できませんでした")
                 # デフォルトメッセージを使用
                 aika_message = "…別に、アンタの動画を解析してやってもいいけど？"
             
+            # 日本語と英語の両方で返信するように修正
+            # Dify APIからの応答を日本語と英語の両方で返す
+            aika_message_jp = aika_message
+            # 英語版を生成（簡易的な翻訳）
+            aika_message_en = f"[Analysis Result]\nPunch Speed: {analysis_result['scores'].get('punch_speed', 0):.1f}/100\nGuard Stability: {analysis_result['scores'].get('guard_stability', 0):.1f}/100\nKick Height: {analysis_result['scores'].get('kick_height', 0):.1f}/100\nCore Rotation: {analysis_result['scores'].get('core_rotation', 0):.1f}/100\n\n{aika_message_jp}"
+            
             # 5. LINE Messaging APIでユーザーに送信（指数関数的バックオフ・リトライ付き）
-            logger.info(f"📁 LINE送信開始: user_id={user_id}")
+            logger.info(f"📁 LINE送信開始: line_user_id={line_user_id}")
             try:
-                send_line_message_with_retry(user_id, aika_message, unique_id)
-                logger.info(f"✅ LINE送信成功: user_id={user_id}")
+                # 日本語と英語の両方で送信
+                combined_message = f"{aika_message_jp}\n\n---\n{aika_message_en}"
+                send_line_message_with_retry(line_user_id, combined_message, unique_id)
+                logger.info(f"✅ LINE送信成功: line_user_id={line_user_id}")
             except Exception as send_error:
                 logger.error(f"❌ LINE送信エラー（リトライ後も失敗）: {str(send_error)}")
                 # エラーが発生しても処理は継続（ログに記録済み）

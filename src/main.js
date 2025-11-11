@@ -4,6 +4,7 @@
 import liff from '@line/liff';
 import { LIFF_CONFIG } from './config.js';
 import { uploadVideoToStorage, initFirebase, ensureFirebaseAuth } from './firebase.js';
+import { getAuth } from 'firebase/auth';
 
 // --- State Management & Constants ---
 
@@ -13,6 +14,9 @@ const appState = {
   selectedFile: null,
   errorMessage: '',
 };
+
+// Firebase Authインスタンスを取得
+const auth = getAuth();
 
 const TSUN_MESSAGES = {
   // Button Labels
@@ -215,6 +219,14 @@ async function handleUpload() {
   setState({ uiState: 'uploading' });
 
   try {
+    // Firebase Anonymous認証のUIDを取得
+    const firebaseUser = auth.currentUser;
+    if (!firebaseUser) {
+      throw new Error('Firebase認証が完了していません。');
+    }
+    const firebaseUserId = firebaseUser.uid;
+    const lineUserId = appState.profile.userId; // LINEユーザーID
+
     const onProgress = (progress) => {
       const message = TSUN_MESSAGES.uploading(Math.round(progress));
       const app = document.getElementById('app');
@@ -223,7 +235,7 @@ async function handleUpload() {
       }
     };
 
-    await uploadVideoToStorage(appState.selectedFile, appState.profile.userId, onProgress);
+    await uploadVideoToStorage(appState.selectedFile, firebaseUserId, lineUserId, onProgress);
     
     setState({ uiState: 'success' });
 
