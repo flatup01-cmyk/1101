@@ -72,7 +72,12 @@ export const lineWebhookRouter = onRequest(
       });
 
       if (event.type === 'message' && event.message.type === 'video') {
-        console.info(`動画メッセージを検知。処理を開始します。(動画ID: ${event.message.id})`);
+        // ソースタイプを判定
+        const sourceType = event.source?.type || 'unknown';
+        const sourceUserId = event.source?.userId || 'unknown';
+        const isRichMenu = event.source?.type === 'richMenu' || false; // リッチメニュー由来かどうか（LINE APIの仕様により、通常はuserとして扱われる可能性がある）
+        
+        console.info(`動画メッセージを検知。処理を開始します。(動画ID: ${event.message.id}, ソースタイプ: ${sourceType}, ユーザーID: ${sourceUserId}, リッチメニュー由来: ${isRichMenu})`);
 
         const userId = event.source.userId;
         const messageId = event.message.id;
@@ -167,6 +172,26 @@ export const lineWebhookRouter = onRequest(
         res.status(200).send('OK');
         
         try {
+          // ★★★★★ 即時受付メッセージを送信 ★★★★★
+          const acceptMessage = {
+            type: 'text',
+            text: 'メッセージを受け付けました。AIKA19号が返信を準備しています...\n\n---\n[English]\nMessage received. AIKA19 is preparing a reply...'
+          };
+          
+          if (event.replyToken && event.replyToken !== LINE_VERIFY_REPLY_TOKEN) {
+            try {
+              await lineClient.replyMessage(event.replyToken, acceptMessage);
+              console.info("テキストメッセージ受付完了メッセージの送信に成功しました（Reply API使用）。");
+            } catch (replyError) {
+              console.warn("Reply API失敗、Push APIにフォールバック:", replyError.message);
+              await lineClient.pushMessage(userId, acceptMessage);
+              console.info("テキストメッセージ受付完了メッセージの送信に成功しました（Push API使用）。");
+            }
+          } else {
+            await lineClient.pushMessage(userId, acceptMessage);
+            console.info("テキストメッセージ受付完了メッセージの送信に成功しました（Push API使用）。");
+          }
+          
           // handleTextChatを使用してDifyで会話処理
           const chatResult = await handleTextChat({
             userId,
