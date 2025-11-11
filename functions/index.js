@@ -91,7 +91,7 @@ export const lineWebhookRouter = onRequest(
           // それ以外はpushMessageを使用
           const replyMessage = {
             type: 'text',
-            text: '動画を受け付けました！AIが解析を開始します。\n\n結果が届くまで、しばらくお待ちください…\n\n※解析は20秒以内/100MB以下の動画が対象です。'
+            text: '動画を受け付けました！AIが解析を開始します。\n\n通常は2〜3分ほどで結果が届きますが、混雑時は最大5分ほどかかる場合があります。どうぞそのままお待ちください。\n\n※解析対象は20秒以内/100MB以下の動画です。\n\n---\n[English]\nWe have received your video. Results usually arrive within 2–3 minutes, though it can take up to 5 minutes during peak times. Thank you for waiting.'
           };
           
           if (event.replyToken && event.replyToken !== LINE_VERIFY_REPLY_TOKEN) {
