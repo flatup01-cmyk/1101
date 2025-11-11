@@ -1,10 +1,6 @@
 // AIKA-18 UI Revolution - Main Entry Point
 // Perfected by your partner.
-<<<<<<< Current (Your changes)
-// Updated: 2025-11-11 - Menu UI implementation
-=======
 // Updated: 2025-11-11 - UI update for Netlify deployment
->>>>>>> Incoming (Background Agent changes)
 
 import liff from '@line/liff';
 import { LIFF_CONFIG } from './config.js';
