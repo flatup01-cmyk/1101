@@ -5,7 +5,7 @@ import {setGlobalOptions} from "firebase-functions/v2";
 import fetch from 'node-fetch';
 import crypto from 'crypto';
 import { admin } from './initAdmin.js'; // 正しいインポート方式
-import { handleVideoJob } from './dify/handler.js';
+import { handleVideoJob, handleImageJob } from './dify/handler.js';
 import { handleTextChat } from './dify/chat.js';
 import { Client } from '@line/bot-sdk'; // 正しいインポート方式
 
@@ -39,7 +39,7 @@ function verifyLineSignature(body, signature, channelSecret) {
 // ================================================================
 export const lineWebhookRouter = onRequest(
   {
-    secrets: ["MAKE_WEBHOOK_URL", "LINE_CHANNEL_ACCESS_TOKEN", "PROCESS_VIDEO_JOB_URL", "DIFY_API_KEY", "LINE_CHANNEL_SECRET"],
+    secrets: ["MAKE_WEBHOOK_URL", "LINE_CHANNEL_ACCESS_TOKEN", "PROCESS_VIDEO_JOB_URL", "PROCESS_IMAGE_JOB_URL", "DIFY_API_KEY", "LINE_CHANNEL_SECRET"],
     serviceAccount: '639286700347-compute@developer.gserviceaccount.com',
     timeoutSeconds: 300,
   },
@@ -91,7 +91,7 @@ export const lineWebhookRouter = onRequest(
           // それ以外はpushMessageを使用
           const replyMessage = {
             type: 'text',
-            text: '動画を受け付けました！AIが解析を開始します。\n\n通常は2〜3分ほどで結果が届きますが、混雑時は最大5分ほどかかる場合があります。どうぞそのままお待ちください。\n\n※解析対象は20秒以内/100MB以下の動画です。\n\n---\n[English]\nWe have received your video. Results usually arrive within 2–3 minutes, though it can take up to 5 minutes during peak times. Thank you for waiting.'
+            text: '動画を受け付けました！AIが解析を開始します。\n\n通常は2〜3分ほどで結果が届きますが、混雑時は最大5分ほどかかる場合があります。どうぞそのままお待ちください。\n体験レッスンのお申し込みはこちら → https://flatupnarita.jp/contact\n\n※解析対象は20秒以内/100MB以下の動画です。\n\n---\n[English]\nWe have received your video. Results usually arrive within 2–3 minutes (up to 5 minutes during peak times). Flatup trial booking → https://flatupnarita.jp/contact'
           };
           
           if (event.replyToken && event.replyToken !== LINE_VERIFY_REPLY_TOKEN) {
@@ -160,6 +160,82 @@ export const lineWebhookRouter = onRequest(
             console.error("LINEメッセージ送信エラー:", pushError);
           }
           // LINEには既にOKを返しているので、ここでは何もしない
+        }
+
+      } else if (event.type === 'message' && event.message.type === 'image') {
+        console.info('画像メッセージを検知。解析ジョブを開始します。');
+        const userId = event.source.userId;
+        const messageId = event.message.id;
+
+        res.status(200).send('OK');
+
+        const acknowledgeMessage = {
+          type: 'text',
+          text: '画像を受け付けました！AIが解析を開始します。\n\n通常は2〜3分ほどで結果が届きますが、混雑時は最大5分ほどかかる場合があります。Flatupの体験レッスンも準備しておくと良いわよ。\n体験レッスンのお申し込みはこちら → https://flatupnarita.jp/contact\n\n---\n[English]\nWe have received your image. Results usually arrive within 2–3 minutes (up to 5 minutes during peak times). Flatup trial booking → https://flatupnarita.jp/contact'
+        };
+
+        try {
+          if (event.replyToken && event.replyToken !== LINE_VERIFY_REPLY_TOKEN) {
+            try {
+              await lineClient.replyMessage(event.replyToken, acknowledgeMessage);
+              console.info('画像受付メッセージをReplyで送信しました。');
+            } catch (replyError) {
+              console.warn('画像受付 Reply 失敗。Pushにフォールバック:', replyError.message);
+              await lineClient.pushMessage(userId, acknowledgeMessage);
+            }
+          } else {
+            await lineClient.pushMessage(userId, acknowledgeMessage);
+          }
+        } catch (ackError) {
+          console.error('画像受付メッセージ送信エラー:', ackError);
+        }
+
+        try {
+          const bucket = admin.storage().bucket();
+          const fileName = `images/${userId}/${messageId}.jpg`;
+          const file = bucket.file(fileName);
+
+          const imageStream = await lineClient.getMessageContent(messageId);
+          await new Promise((resolve, reject) => {
+            const writeStream = file.createWriteStream({ contentType: 'image/jpeg' });
+            imageStream.pipe(writeStream);
+            writeStream.on('finish', resolve);
+            writeStream.on('error', reject);
+          });
+
+          console.info(`画像をCloud Storageに保存しました: ${fileName}`);
+
+          const [signedUrl] = await file.getSignedUrl({
+            version: 'v4',
+            action: 'read',
+            expires: Date.now() + 15 * 60 * 1000,
+          });
+
+          const processImageJobUrl = process.env.PROCESS_IMAGE_JOB_URL;
+          if (!processImageJobUrl) {
+            throw new Error('PROCESS_IMAGE_JOB_URL が設定されていません');
+          }
+
+          fetch(processImageJobUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              jobId: messageId,
+              lineUserId: userId,
+              imageUrl: signedUrl,
+            }),
+          });
+          console.info('画像解析ジョブを起動しました。');
+        } catch (error) {
+          console.error('画像処理エラー:', error);
+          try {
+            await lineClient.pushMessage(userId, {
+              type: 'text',
+              text: '画像の解析に失敗したわ。画像が不鮮明か大きすぎる可能性があるから、調整してもう一度送ってみなさい。\n\n---\n[English]\nImage analysis failed. Please try again with a clearer or smaller image.',
+            });
+          } catch (pushError) {
+            console.error('画像エラー通知送信エラー:', pushError);
+          }
         }
 
       } else if (event.type === 'message' && event.message.type === 'text') {
@@ -299,6 +375,47 @@ export const processVideoJob = onRequest(
       res.status(200).json({ ok: true, result });
     } catch (error) {
       console.error("processVideoJobでエラー:", error);
+      res.status(500).json({ ok: false, error: error.message });
+    }
+  }
+);
+
+export const processImageJob = onRequest(
+  {
+    secrets: ["DIFY_API_KEY", "LINE_CHANNEL_ACCESS_TOKEN"],
+    timeoutSeconds: 180,
+  },
+  async (req, res) => {
+    if (req.body && req.body.events && Array.isArray(req.body.events)) {
+      console.info("processImageJob: LINE Webhookリクエストを検知。無視します。");
+      res.status(200).json({ ok: true, message: "LINE WebhookはlineWebhookRouterで処理されます" });
+      return;
+    }
+
+    try {
+      const { jobId, lineUserId, imageUrl } = req.body;
+      if (!imageUrl) {
+        throw new Error('imageUrl is required');
+      }
+      if (!lineUserId) {
+        throw new Error('lineUserId is required');
+      }
+
+      console.info(`processImageJob開始: jobId=${jobId}, lineUserId=${lineUserId}, imageUrl=${imageUrl}`);
+
+      const result = await handleImageJob({
+        jobId: jobId || lineUserId,
+        userId: lineUserId,
+        lineUserId,
+        imageUrl,
+        conversationId: null,
+        extraJobData: {},
+      });
+
+      console.info("processImageJob成功:", JSON.stringify(result));
+      res.status(200).json({ ok: true, result });
+    } catch (error) {
+      console.error("processImageJobでエラー:", error);
       res.status(500).json({ ok: false, error: error.message });
     }
   }

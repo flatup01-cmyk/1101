@@ -1,6 +1,6 @@
 import fetch from 'node-fetch';
 import admin from 'firebase-admin';
-import { analyzeVideoBlocking } from './dify.js';
+import { analyzeVideoBlocking, analyzeImage } from './dify.js';
 import { analyzeVideoStreaming } from './dify_streaming.js';
 import { buildFallbackAnswer, requireEnv } from './util.js';
 
@@ -58,10 +58,10 @@ async function sendLineMessage(to, text) {
  * @param {string} jobId
  * @param {Record<string, any>} payload
  */
-async function updateJobDocument(jobId, payload) {
+async function updateJobDocument(jobId, payload, collectionName = 'video_jobs') {
   if (!jobId) return;
 
-  const docRef = firestore.doc(`video_jobs/${jobId}`);
+  const docRef = firestore.doc(`${collectionName}/${jobId}`);
   await docRef.set(
     {
       ...payload,
@@ -172,6 +172,88 @@ export async function handleVideoJob({
   }
 
   await updateJobDocument(jobId, jobPayload);
+
+  if (lineError) {
+    throw lineError;
+  }
+
+  return {
+    answer,
+    conversation_id: effectiveConversationId,
+    meta,
+  };
+}
+
+/**
+ * Orchestrate image analysis (fight card prediction etc.).
+ * @param {Object} params
+ * @param {string} params.jobId
+ * @param {string} params.userId
+ * @param {string} params.lineUserId
+ * @param {string} params.imageUrl
+ * @param {string|null} [params.conversationId]
+ * @param {Record<string, any>} [params.extraJobData]
+ */
+export async function handleImageJob({
+  jobId,
+  userId,
+  lineUserId,
+  imageUrl,
+  conversationId = null,
+  extraJobData = {},
+}) {
+  if (!imageUrl) {
+    throw new Error('imageUrl is required');
+  }
+  if (!lineUserId) {
+    throw new Error('lineUserId is required');
+  }
+
+  let difyResult;
+  try {
+    difyResult = await analyzeImage({ imageUrl, userId, conversationId });
+  } catch (error) {
+    const fallback = buildFallbackAnswer('画像解析でエラーが発生しました。別の画像でお試しください。');
+    await updateJobDocument(jobId, {
+      status: 'error',
+      error_message: error.message,
+      conversation_id: conversationId,
+      last_message: fallback,
+      media_type: 'image',
+      ...extraJobData,
+    }, 'image_jobs');
+    throw error;
+  }
+
+  const { answer, meta, conversation_id: newConversationId } = difyResult;
+  const effectiveConversationId = newConversationId ?? conversationId ?? null;
+
+  let processedAnswer = answer;
+  if (!processedAnswer.includes('[English]') && !processedAnswer.includes('---\n[English]')) {
+    processedAnswer = `${processedAnswer}\n\n---\n[English]\n${processedAnswer}`;
+  }
+
+  let lineError;
+  try {
+    await sendLineMessage(lineUserId, processedAnswer);
+  } catch (error) {
+    lineError = error;
+  }
+
+  const status = lineError ? 'line_failed' : 'completed';
+  const payload = {
+    status,
+    conversation_id: effectiveConversationId,
+    dify_meta: meta ?? {},
+    last_message: answer,
+    media_type: 'image',
+    ...extraJobData,
+  };
+  if (lineError) {
+    payload.line_error = lineError.message;
+  }
+
+  await updateJobDocument(jobId, payload, 'image_jobs');
 
   if (lineError) {
     throw lineError;
