@@ -1,6 +1,6 @@
 import fetch from 'node-fetch';
 import admin from 'firebase-admin';
-import { analyzeVideoBlocking, analyzeImage } from './dify.js';
+import { analyzeVideoBlocking } from './dify.js';
 import { analyzeVideoStreaming } from './dify_streaming.js';
 import { buildFallbackAnswer, requireEnv } from './util.js';
 
@@ -58,10 +58,10 @@ async function sendLineMessage(to, text) {
  * @param {string} jobId
  * @param {Record<string, any>} payload
  */
-async function updateJobDocument(jobId, payload, collectionName = 'video_jobs') {
+async function updateJobDocument(jobId, payload) {
   if (!jobId) return;
 
-  const docRef = firestore.doc(`${collectionName}/${jobId}`);
+  const docRef = firestore.doc(`video_jobs/${jobId}`);
   await docRef.set(
     {
       ...payload,
@@ -110,7 +110,22 @@ export async function handleVideoJob({
   try {
     difyResult = await analyzer({ videoUrl, userId, conversationId });
   } catch (error) {
-    const fallback = buildFallbackAnswer('解析処理でエラーが発生しました');
+    console.error("動画解析処理でエラーが発生しました:", {
+      error: error.message,
+      stack: error.stack,
+      videoUrl: videoUrl.substring(0, 100) + '...',
+      userId: userId,
+    });
+    
+    // ユーザーにエラーメッセージを送信
+    const fallback = buildFallbackAnswer('解析処理でエラーが発生しました。動画の形式を確認して再度お試しください。');
+    try {
+      await sendLineMessage(lineUserId, fallback);
+      console.info("ユーザーへエラーメッセージを送信しました");
+    } catch (sendError) {
+      console.error("エラーメッセージの送信に失敗しました:", sendError.message);
+    }
+    
     await updateJobDocument(jobId, {
       status: 'error',
       error_message: error.message,
@@ -125,34 +140,39 @@ export async function handleVideoJob({
   const { answer, meta, conversation_id: newConversationId } = difyResult;
   const effectiveConversationId = newConversationId ?? conversationId ?? null;
 
-  // 日本語と英語の両方で返信するように修正
-  const answerJp = answer;
-  
-  // 英語翻訳を試みる（Difyが英語も返している場合はそれを使用、そうでない場合は翻訳APIを使用）
-  let answerEn = '';
-  let combinedAnswer = answerJp;
-  
+  // 英語サマリーを追加（Dify APIのレスポンスに英語が含まれていない場合のフォールバック）
+  // Dify APIのレスポンスから数値を抽出して英語サマリーを生成
+  let englishSummary = '';
   try {
-    // Difyの回答に英語が含まれているか確認
-    if (answerJp.includes('[English]') || answerJp.includes('---\n[English]')) {
-      // 既に英語が含まれている場合はそのまま使用
-      combinedAnswer = answerJp;
+    // レスポンスから数値を抽出（戦闘力、スコアなど）
+    const scoreMatches = answer.match(/(?:戦闘力|スコア|パンチ力|キック力|防御力|スタミナ|技術力|スピード|戦闘経験)[：:]\s*(\d+(?:\.\d+)?)/g);
+    if (scoreMatches && scoreMatches.length > 0) {
+      const scores = scoreMatches.map(match => {
+        const value = match.match(/(\d+(?:\.\d+)?)/);
+        return value ? parseFloat(value[1]) : 0;
+      });
+      const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+      
+      englishSummary = `\n\n--- Analysis Results (English) ---\n`;
+      englishSummary += `Average Score: ${avgScore.toFixed(1)}/100\n`;
+      englishSummary += `(Scores extracted from analysis: ${scores.length} items)`;
     } else {
-      // 英語翻訳を試みる（Google Translate APIまたはDifyの翻訳機能を使用）
-      // 注意: 実際の翻訳APIを使用する場合は、ここで実装してください
-      // 現在は簡易的な英語版を生成
-      answerEn = `[Analysis Result]\n${answerJp}`;
-      combinedAnswer = `${answerJp}\n\n---\n[English]\n${answerEn}`;
+      // 数値が見つからない場合のデフォルトメッセージ
+      englishSummary = `\n\n--- Analysis Results (English) ---\n`;
+      englishSummary += `Video analysis completed successfully.\n`;
+      englishSummary += `Please refer to the Japanese analysis above for detailed results.`;
     }
-  } catch (translateError) {
-    // 翻訳エラー時は日本語のみを送信
-    console.warn('英語翻訳エラー:', translateError);
-    combinedAnswer = answerJp;
+  } catch (error) {
+    console.error('英語サマリー生成エラー:', error);
+    // エラー時は最小限の英語メッセージを追加
+    englishSummary = `\n\n--- Analysis Results (English) ---\nVideo analysis completed.`;
   }
+
+  const fullMessage = answer + englishSummary;
 
   let lineError;
   try {
-    await sendLineMessage(lineUserId, combinedAnswer);
+    await sendLineMessage(lineUserId, fullMessage);
   } catch (error) {
     lineError = error;
   }
@@ -163,7 +183,8 @@ export async function handleVideoJob({
     conversation_id: effectiveConversationId,
     dify_mode: selectStreaming ? 'streaming' : 'blocking',
     dify_meta: meta ?? {},
-    last_message: answer,
+    last_message: fullMessage, // 英語サマリーを含む完全なメッセージ
+    original_answer: answer, // 元のDify APIレスポンスも保存
     ...extraJobData,
   };
 
@@ -178,89 +199,7 @@ export async function handleVideoJob({
   }
 
   return {
-    answer,
-    conversation_id: effectiveConversationId,
-    meta,
-  };
-}
-
-/**
- * Orchestrate image analysis (fight card prediction etc.).
- * @param {Object} params
- * @param {string} params.jobId
- * @param {string} params.userId
- * @param {string} params.lineUserId
- * @param {string} params.imageUrl
- * @param {string|null} [params.conversationId]
- * @param {Record<string, any>} [params.extraJobData]
- */
-export async function handleImageJob({
-  jobId,
-  userId,
-  lineUserId,
-  imageUrl,
-  conversationId = null,
-  extraJobData = {},
-}) {
-  if (!imageUrl) {
-    throw new Error('imageUrl is required');
-  }
-  if (!lineUserId) {
-    throw new Error('lineUserId is required');
-  }
-
-  let difyResult;
-  try {
-    difyResult = await analyzeImage({ imageUrl, userId, conversationId });
-  } catch (error) {
-    const fallback = buildFallbackAnswer('画像解析でエラーが発生しました。別の画像でお試しください。');
-    await updateJobDocument(jobId, {
-      status: 'error',
-      error_message: error.message,
-      conversation_id: conversationId,
-      last_message: fallback,
-      media_type: 'image',
-      ...extraJobData,
-    }, 'image_jobs');
-    throw error;
-  }
-
-  const { answer, meta, conversation_id: newConversationId } = difyResult;
-  const effectiveConversationId = newConversationId ?? conversationId ?? null;
-
-  let processedAnswer = answer;
-  if (!processedAnswer.includes('[English]') && !processedAnswer.includes('---\n[English]')) {
-    processedAnswer = `${processedAnswer}\n\n---\n[English]\n${processedAnswer}`;
-  }
-
-  let lineError;
-  try {
-    await sendLineMessage(lineUserId, processedAnswer);
-  } catch (error) {
-    lineError = error;
-  }
-
-  const status = lineError ? 'line_failed' : 'completed';
-  const payload = {
-    status,
-    conversation_id: effectiveConversationId,
-    dify_meta: meta ?? {},
-    last_message: answer,
-    media_type: 'image',
-    ...extraJobData,
-  };
-  if (lineError) {
-    payload.line_error = lineError.message;
-  }
-
-  await updateJobDocument(jobId, payload, 'image_jobs');
-
-  if (lineError) {
-    throw lineError;
-  }
-
-  return {
-    answer,
+    answer: fullMessage, // 英語サマリーを含む完全なメッセージを返す
     conversation_id: effectiveConversationId,
     meta,
   };
