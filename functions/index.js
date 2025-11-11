@@ -3,10 +3,9 @@
 import {onRequest} from "firebase-functions/v2/https";
 import {setGlobalOptions} from "firebase-functions/v2";
 import fetch from 'node-fetch';
-import crypto from 'crypto';
 import { admin } from './initAdmin.js'; // 正しいインポート方式
-import { handleVideoJob, handleImageJob } from './dify/handler.js';
-import { handleTextChat } from './dify/chat.js';
+import { handleVideoJob } from './dify/handler.js';
+import { chatWithDify } from './dify/dify.js';
 import { Client } from '@line/bot-sdk'; // 正しいインポート方式
 
 // Functionsの全体設定
@@ -15,50 +14,17 @@ setGlobalOptions({region: "asia-northeast1"});
 // 定数定義
 const LINE_VERIFY_REPLY_TOKEN = '00000000000000000000000000000000';
 
-/**
- * LINE Webhook署名検証関数
- * @param {string} body - リクエストボディ（JSON文字列）
- * @param {string} signature - X-Line-Signatureヘッダーの値
- * @param {string} channelSecret - LINEチャネルシークレット
- * @returns {boolean} 検証成功時true
- */
-function verifyLineSignature(body, signature, channelSecret) {
-  if (!signature || !channelSecret) {
-    console.warn("署名またはチャネルシークレットが設定されていません");
-    return false;
-  }
-  const hash = crypto
-    .createHmac('sha256', channelSecret)
-    .update(body)
-    .digest('base64');
-  return hash === signature;
-}
-
 // ================================================================
 // ★ LINE Webhook Router Function (門番) ★
 // ================================================================
 export const lineWebhookRouter = onRequest(
   {
-    secrets: ["MAKE_WEBHOOK_URL", "LINE_CHANNEL_ACCESS_TOKEN", "PROCESS_VIDEO_JOB_URL", "PROCESS_IMAGE_JOB_URL", "DIFY_API_KEY", "LINE_CHANNEL_SECRET"],
+    secrets: ["MAKE_WEBHOOK_URL", "LINE_CHANNEL_ACCESS_TOKEN", "PROCESS_VIDEO_JOB_URL", "DIFY_API_KEY"],
     serviceAccount: '639286700347-compute@developer.gserviceaccount.com',
     timeoutSeconds: 300,
   },
   async (req, res) => {
     try {
-      // LINE Webhook署名検証（セキュリティ強化）
-      const signature = req.headers['x-line-signature'];
-      const rawBody = JSON.stringify(req.body);
-      const channelSecret = process.env.LINE_CHANNEL_SECRET;
-      
-      // 検証トークンの場合はスキップ
-      if (req.body.events && req.body.events[0] && req.body.events[0].replyToken === LINE_VERIFY_REPLY_TOKEN) {
-        console.info("検証トークンのため署名検証をスキップします。");
-      } else if (channelSecret && !verifyLineSignature(rawBody, signature, channelSecret)) {
-        console.error("LINE Webhook署名検証失敗");
-        res.status(401).send('Unauthorized');
-        return;
-      }
-      
       const events = req.body.events;
       if (!events || events.length === 0 || events[0].replyToken === LINE_VERIFY_REPLY_TOKEN) {
         console.info("処理対象外のイベントのため終了します。");
@@ -72,56 +38,50 @@ export const lineWebhookRouter = onRequest(
       });
 
       if (event.type === 'message' && event.message.type === 'video') {
-        // ソースタイプを判定
-        const sourceType = event.source?.type || 'unknown';
-        const sourceUserId = event.source?.userId || 'unknown';
-        const isRichMenu = event.source?.type === 'richMenu' || false; // リッチメニュー由来かどうか（LINE APIの仕様により、通常はuserとして扱われる可能性がある）
-        
-        console.info(`動画メッセージを検知。処理を開始します。(動画ID: ${event.message.id}, ソースタイプ: ${sourceType}, ユーザーID: ${sourceUserId}, リッチメニュー由来: ${isRichMenu})`);
+        // ソースタイプを判定（リッチメニュー経由か通常メッセージか）
+        const sourceType = event.source?.type === 'user' ? '通常メッセージ' : 
+                           event.source?.type === 'group' ? 'グループ' :
+                           event.source?.type === 'room' ? 'トークルーム' : '不明';
+        const sourceInfo = event.source?.userId ? `userId: ${event.source.userId}` : 'userId不明';
+        console.info(`動画メッセージを検知。処理を開始します。(動画ID: ${event.message.id}, ソース: ${sourceType}, ${sourceInfo})`);
 
-        const userId = event.source.userId;
-        const messageId = event.message.id;
-        
-        // 先にLINEにOKを返す（replyTokenの有効期限を考慮）
-        res.status(200).send('OK');
-        
+        // 動画処理のエラーハンドリング: 全ての処理をtry/catchで包み、エラーを確実に捕捉
         try {
-          // ★★★★★ リプライトークンエラー対策 ★★★★★
-          // replyTokenが存在し、有効な場合のみreplyMessageを使用
-          // それ以外はpushMessageを使用
+          // 1. まず、ユーザーに「受け付けました」と返信する (LINEへのOK応答より先に！)
           const replyMessage = {
             type: 'text',
-            text: '動画を受け付けました！AIが解析を開始します。\n\n通常は2〜3分ほどで結果が届きますが、混雑時は最大5分ほどかかる場合があります。どうぞそのままお待ちください。\n体験レッスンのお申し込みはこちら → https://flatupnarita.jp/contact\n\n※解析対象は20秒以内/100MB以下の動画です。\n\n---\n[English]\nWe have received your video. Results usually arrive within 2–3 minutes (up to 5 minutes during peak times). Flatup trial booking → https://flatupnarita.jp/contact'
+            text: '動画を受け付けました！AIが解析を開始します。\n\n結果が届くまで、しばらくお待ちください…\n\n※解析は20秒以内/100MB以下の動画が対象です。'
           };
+          // このawaitで、返信が終わるまで待つ
+          await lineClient.replyMessage(event.replyToken, replyMessage);
+          console.info("ユーザーへの受付完了メッセージの送信に成功しました。");
           
-          if (event.replyToken && event.replyToken !== LINE_VERIFY_REPLY_TOKEN) {
-            try {
-              // replyTokenが有効な場合、即座に返信
-              await lineClient.replyMessage(event.replyToken, replyMessage);
-              console.info("ユーザーへの受付完了メッセージの送信に成功しました（Reply API使用）。");
-            } catch (replyError) {
-              // replyTokenが無効または失効している場合、pushMessageにフォールバック
-              console.warn("Reply API失敗、Push APIにフォールバック:", replyError.message);
-              await lineClient.pushMessage(userId, replyMessage);
-              console.info("ユーザーへの受付完了メッセージの送信に成功しました（Push API使用）。");
-            }
-          } else {
-            // replyTokenが存在しない場合、pushMessageを使用
-            await lineClient.pushMessage(userId, replyMessage);
-            console.info("ユーザーへの受付完了メッセージの送信に成功しました（Push API使用）。");
-          }
+          // 2. ユーザーへの返信が終わってから、LINEに「OK」と応答する
+          res.status(200).send('OK');
           
           // --- ここから先の重い処理は、レスポンスを返した後にゆっくり実行される ---
-          const fileName = `${userId}/${messageId}.mp4`; // Difyのルールに合わせて、videos/接頭辞を削除
+          const messageId = event.message.id;
+          const userId = event.source.userId;
+          const fileName = `videos/${userId}/${messageId}.mp4`; // Storageトリガーで処理されるようにvideos/プレフィックスを追加
           const bucket = admin.storage().bucket();
           const file = bucket.file(fileName);
 
+          console.info(`動画コンテンツの取得を開始します (ID: ${messageId})`);
           const videoStream = await lineClient.getMessageContent(messageId);
+          
           await new Promise((resolve, reject) => {
             const writeStream = file.createWriteStream();
             videoStream.pipe(writeStream);
             writeStream.on('finish', resolve);
-            writeStream.on('error', reject);
+            // ストリームの途中でエラーが起きたら、それを捕捉してrejectする
+            writeStream.on('error', (err) => {
+              console.error("動画のCloud Storageへの書き込み中にストリームエラーが発生しました:", err);
+              reject(err);
+            });
+            videoStream.on('error', (err) => {
+              console.error("LINEからの動画ダウンロード中にストリームエラーが発生しました:", err);
+              reject(err);
+            });
           });
           
           console.info(`動画をCloud Storageに保存しました: ${fileName}`);
@@ -141,185 +101,110 @@ export const lineWebhookRouter = onRequest(
           
           const processVideoJobUrl = process.env.PROCESS_VIDEO_JOB_URL;
           
+          if (!processVideoJobUrl) {
+            throw new Error('PROCESS_VIDEO_JOB_URL環境変数が設定されていません');
+          }
+          
           // Difyの処理は時間がかかるので、呼び出しっぱなしでOK
+          // ただし、エラーが発生した場合はログに記録
           fetch(processVideoJobUrl, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ jobId: messageId, lineUserId: userId, videoUrl: videoUrl })
+          }).catch((fetchError) => {
+            console.error(`Dify処理関数の呼び出しでエラーが発生しました: ${fetchError.message}`);
+            // fetchエラーは非同期なので、ここではログのみ記録
+            // ユーザーへの通知はprocessVideoJob側で行う
           });
           console.info(`Dify処理関数 (processVideoJob) の呼び出しを開始しました。`);
+
         } catch (error) {
-          console.error("動画処理エラー:", error);
-          // エラー時も必ずメッセージを返す
+          // エラーハンドリング: 動画処理中のエラーを捕捉し、ユーザーに通知
+          console.error("動画処理の途中で致命的なエラーを検知しました:", error);
+          console.error("エラーの詳細:", {
+            message: error.message,
+            stack: error.stack,
+            name: error.name,
+            videoId: event.message?.id,
+            userId: event.source?.userId,
+          });
+
+          // ユーザーに、正直に「失敗したこと」とその理由を伝える
+          const errorMessage = {
+            type: 'text',
+            text: `申し訳ありません、お送りいただいた動画の処理中にエラーが発生しました。\n\n動画の形式（フォーマット）が特殊であるか、ファイルが破損している可能性があります。\n\n恐れ入りますが、別の動画でお試しいただくか、時間をおいて再度お試しください。`
+          };
+          
+          // 失敗しても、ユーザーには必ず応答を返す (Push APIを使用)
+          // replyTokenは既に使用済みの可能性があるため、pushMessageを使用
           try {
-            await lineClient.pushMessage(userId, {
-              type: 'text',
-              text: '…チッ、動画の処理中にエラーが発生したわ。もう一度送り直してみなさい。\n\n---\n[English]\nAn error occurred while processing your video. Please try again.'
-            });
+            await lineClient.pushMessage(event.source.userId, errorMessage);
+            console.info("ユーザーへ、動画処理失敗のエラーメッセージを送信しました。");
           } catch (pushError) {
-            console.error("LINEメッセージ送信エラー:", pushError);
-          }
-          // LINEには既にOKを返しているので、ここでは何もしない
-        }
-
-      } else if (event.type === 'message' && event.message.type === 'image') {
-        console.info('画像メッセージを検知。解析ジョブを開始します。');
-        const userId = event.source.userId;
-        const messageId = event.message.id;
-
-        res.status(200).send('OK');
-
-        const acknowledgeMessage = {
-          type: 'text',
-          text: '画像を受け付けました！AIが解析を開始します。\n\n通常は2〜3分ほどで結果が届きますが、混雑時は最大5分ほどかかる場合があります。Flatupの体験レッスンも準備しておくと良いわよ。\n体験レッスンのお申し込みはこちら → https://flatupnarita.jp/contact\n\n---\n[English]\nWe have received your image. Results usually arrive within 2–3 minutes (up to 5 minutes during peak times). Flatup trial booking → https://flatupnarita.jp/contact'
-        };
-
-        try {
-          if (event.replyToken && event.replyToken !== LINE_VERIFY_REPLY_TOKEN) {
-            try {
-              await lineClient.replyMessage(event.replyToken, acknowledgeMessage);
-              console.info('画像受付メッセージをReplyで送信しました。');
-            } catch (replyError) {
-              console.warn('画像受付 Reply 失敗。Pushにフォールバック:', replyError.message);
-              await lineClient.pushMessage(userId, acknowledgeMessage);
-            }
-          } else {
-            await lineClient.pushMessage(userId, acknowledgeMessage);
-          }
-        } catch (ackError) {
-          console.error('画像受付メッセージ送信エラー:', ackError);
-        }
-
-        try {
-          const bucket = admin.storage().bucket();
-          const fileName = `images/${userId}/${messageId}.jpg`;
-          const file = bucket.file(fileName);
-
-          const imageStream = await lineClient.getMessageContent(messageId);
-          await new Promise((resolve, reject) => {
-            const writeStream = file.createWriteStream({ contentType: 'image/jpeg' });
-            imageStream.pipe(writeStream);
-            writeStream.on('finish', resolve);
-            writeStream.on('error', reject);
-          });
-
-          console.info(`画像をCloud Storageに保存しました: ${fileName}`);
-
-          const [signedUrl] = await file.getSignedUrl({
-            version: 'v4',
-            action: 'read',
-            expires: Date.now() + 15 * 60 * 1000,
-          });
-
-          const processImageJobUrl = process.env.PROCESS_IMAGE_JOB_URL;
-          if (!processImageJobUrl) {
-            throw new Error('PROCESS_IMAGE_JOB_URL が設定されていません');
-          }
-
-          fetch(processImageJobUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              jobId: messageId,
-              lineUserId: userId,
-              imageUrl: signedUrl,
-            }),
-          });
-          console.info('画像解析ジョブを起動しました。');
-        } catch (error) {
-          console.error('画像処理エラー:', error);
-          try {
-            await lineClient.pushMessage(userId, {
-              type: 'text',
-              text: '画像の解析に失敗したわ。画像が不鮮明か大きすぎる可能性があるから、調整してもう一度送ってみなさい。\n\n---\n[English]\nImage analysis failed. Please try again with a clearer or smaller image.',
-            });
-          } catch (pushError) {
-            console.error('画像エラー通知送信エラー:', pushError);
+            console.error(`エラーメッセージの送信にも失敗しました: ${pushError.message}`);
+            // エラーメッセージの送信に失敗した場合でも、ログには記録済み
           }
         }
 
       } else if (event.type === 'message' && event.message.type === 'text') {
-        // [テキストメッセージの処理] - Dify APIで直接会話
-        console.info(`テキストメッセージを検知。Dify APIで会話を開始します。`);
+        // [テキストメッセージの処理 - Dify APIで会話処理]
+        console.info(`テキストメッセージを検知。Dify APIで会話処理を開始します。`);
         const userId = event.source.userId;
         const userMessage = event.message.text;
         
         // 先にLINEにOKを返す
         res.status(200).send('OK');
         
-        try {
-          // ★★★★★ 即時受付メッセージを送信 ★★★★★
-          const acceptMessage = {
-            type: 'text',
-            text: 'メッセージを受け付けました。AIKA19号が返信を準備しています...\n\n---\n[English]\nMessage received. AIKA19 is preparing a reply...'
-          };
-          
-          if (event.replyToken && event.replyToken !== LINE_VERIFY_REPLY_TOKEN) {
-            try {
-              await lineClient.replyMessage(event.replyToken, acceptMessage);
-              console.info("テキストメッセージ受付完了メッセージの送信に成功しました（Reply API使用）。");
-            } catch (replyError) {
-              console.warn("Reply API失敗、Push APIにフォールバック:", replyError.message);
-              await lineClient.pushMessage(userId, acceptMessage);
-              console.info("テキストメッセージ受付完了メッセージの送信に成功しました（Push API使用）。");
-            }
-          } else {
-            await lineClient.pushMessage(userId, acceptMessage);
-            console.info("テキストメッセージ受付完了メッセージの送信に成功しました（Push API使用）。");
-          }
-          
-          // handleTextChatを使用してDifyで会話処理
-          const chatResult = await handleTextChat({
-            userId,
-            userMessage,
-            conversationId: null, // Firestoreから取得される
-            userGender: 'unknown', // Firestoreから取得される
-          });
-
-          const aikaReply = chatResult.answer;
-          
-          // LINEに返信（日本語と英語の両方で）
-          // Difyが既に英語を含んでいる場合はそのまま使用、そうでない場合は簡易的な英語版を追加
-          let replyText = aikaReply;
-          if (!aikaReply.includes('[English]') && !aikaReply.includes('---\n[English]')) {
-            replyText = `${aikaReply}\n\n---\n[English]\n${aikaReply}`;
-          }
-          
-          await lineClient.pushMessage(userId, {
-            type: 'text',
-            text: replyText
-          });
-          
-          console.info(`Dify API会話成功: ${aikaReply.substring(0, 50)}...`);
-        } catch (error) {
-          console.error("テキストメッセージ処理エラー:", error);
+        // 非同期処理はレスポンス返却後に実行
+        (async () => {
           try {
+            // Firestoreから会話IDを取得
+            const db = admin.firestore();
+            const userDocRef = db.collection('users').doc(userId);
+            const userDoc = await userDocRef.get();
+            let conversationId = null;
+            
+            if (userDoc.exists) {
+              conversationId = userDoc.data()?.conversationId || null;
+            }
+            
+            // Dify APIで会話処理
+            const chatResult = await chatWithDify({
+              message: userMessage,
+              userId: userId,
+              conversationId: conversationId,
+            });
+            
+            // 会話IDをFirestoreに保存
+            await userDocRef.set({
+              conversationId: chatResult.conversation_id,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
+            
+            // LINEに返信を送信
             await lineClient.pushMessage(userId, {
               type: 'text',
-              text: '申し訳ございません。エラーが発生しました。しばらくしてから再度お試しください。\n\n---\n[English]\nSorry, an error occurred. Please try again later.'
+              text: chatResult.answer,
             });
-          } catch (pushError) {
-            console.error("LINEメッセージ送信エラー:", pushError);
+            
+            console.info(`Dify会話処理成功: conversationId=${chatResult.conversation_id}`);
+          } catch (error) {
+            console.error(`Dify会話処理エラー: ${error.message}`);
+            // エラー時はフォールバックメッセージを送信
+            try {
+              await lineClient.pushMessage(userId, {
+                type: 'text',
+                text: 'すみません、一時的なエラーが発生しました。しばらく待ってから再度お試しください。',
+              });
+            } catch (pushError) {
+              console.error(`LINE送信エラー: ${pushError.message}`);
+            }
           }
-        }
+        })();
       } else {
-        // [その他のイベントの処理] - Make.comへ転送
-        console.info(`その他のイベントを検知。Make.comへ転送します。`);
-        // この場合も、先にLINEにOKを返してから、転送処理を行う
+        // [その他のイベントの処理]
+        console.info(`その他のイベントを検知。スキップします。`);
         res.status(200).send('OK');
-
-        const makeWebhookUrl = process.env.MAKE_WEBHOOK_URL;
-        if (!makeWebhookUrl) {
-          console.error("MAKE_WEBHOOK_URLが設定されていません。");
-          return;
-        }
-        // 転送処理は呼び出しっぱなしでOK
-        fetch(makeWebhookUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(req.body)
-        });
-        console.info(`Make.comへの転送を開始しました。`);
       }
     } catch (error) {
       console.error("lineWebhookRouterで予期せぬエラーが発生しました:", error);
@@ -375,47 +260,6 @@ export const processVideoJob = onRequest(
       res.status(200).json({ ok: true, result });
     } catch (error) {
       console.error("processVideoJobでエラー:", error);
-      res.status(500).json({ ok: false, error: error.message });
-    }
-  }
-);
-
-export const processImageJob = onRequest(
-  {
-    secrets: ["DIFY_API_KEY", "LINE_CHANNEL_ACCESS_TOKEN"],
-    timeoutSeconds: 180,
-  },
-  async (req, res) => {
-    if (req.body && req.body.events && Array.isArray(req.body.events)) {
-      console.info("processImageJob: LINE Webhookリクエストを検知。無視します。");
-      res.status(200).json({ ok: true, message: "LINE WebhookはlineWebhookRouterで処理されます" });
-      return;
-    }
-
-    try {
-      const { jobId, lineUserId, imageUrl } = req.body;
-      if (!imageUrl) {
-        throw new Error('imageUrl is required');
-      }
-      if (!lineUserId) {
-        throw new Error('lineUserId is required');
-      }
-
-      console.info(`processImageJob開始: jobId=${jobId}, lineUserId=${lineUserId}, imageUrl=${imageUrl}`);
-
-      const result = await handleImageJob({
-        jobId: jobId || lineUserId,
-        userId: lineUserId,
-        lineUserId,
-        imageUrl,
-        conversationId: null,
-        extraJobData: {},
-      });
-
-      console.info("processImageJob成功:", JSON.stringify(result));
-      res.status(200).json({ ok: true, result });
-    } catch (error) {
-      console.error("processImageJobでエラー:", error);
       res.status(500).json({ ok: false, error: error.message });
     }
   }
