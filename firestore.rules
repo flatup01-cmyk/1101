@@ -36,6 +36,18 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // usersコレクションのルール（会話コンテキスト管理用）
+    match /users/{userId} {
+      // Cloud Functionsからの書き込みを許可（Admin SDKを使用するため、実際にはルールの影響を受けないが、将来のクライアント側アクセスに備えて設定）
+      // 読み取りは認証済みユーザーが自分のデータのみ
+      allow read: if request.auth != null && request.auth.uid == userId;
+      
+      // 書き込みは認証済みユーザーが自分のデータのみ、かつ特定のフィールドのみ変更可能
+      allow write: if request.auth != null 
+                     && request.auth.uid == userId
+                     && request.resource.data.keys().hasOnly(['conversation_id', 'updated_at']);
+    }
+
     // その他のコレクションはデフォルトで拒否
     match /{document=**} {
       allow read, write: if false;
