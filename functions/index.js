@@ -6,6 +6,7 @@ import fetch from 'node-fetch';
 import { admin } from './initAdmin.js'; // 正しいインポート方式
 import { handleVideoJob } from './dify/handler.js';
 import { chatWithDify } from './dify/chat.js';
+import { checkProcessingGuards, notifyGuardDenied, isLikelyValidLineUserId } from './guards.js';
 import { Client } from '@line/bot-sdk'; // 正しいインポート方式
 
 // Functionsの全体設定
@@ -13,6 +14,7 @@ setGlobalOptions({region: "asia-northeast1"});
 
 // 定数定義
 const LINE_VERIFY_REPLY_TOKEN = '00000000000000000000000000000000';
+const firestore = admin.firestore();
 
 // ================================================================
 // ★ LINE Webhook Router Function (門番) ★
@@ -42,6 +44,14 @@ export const lineWebhookRouter = onRequest(
         const sourceType = event.source?.type || 'unknown';
         const userId = event.source?.userId || 'unknown';
         const messageId = event.message.id;
+
+        const guardResult = await checkProcessingGuards({ userId, contentType: 'video' });
+        if (!guardResult.allowed) {
+          await notifyGuardDenied({ lineClient, replyToken: event.replyToken, userId, guardResult });
+          res.status(200).send('OK');
+          return;
+        }
+
         // リッチメニュー経由かどうかは、イベントの詳細情報から判定
         // 通常のメッセージイベントとして来るため、詳細情報をログに出力
         console.info(`動画メッセージを検知。処理を開始します。(動画ID: ${messageId}, ソースタイプ: ${sourceType}, ユーザーID: ${userId})`);
@@ -113,14 +123,18 @@ export const lineWebhookRouter = onRequest(
           });
 
           // ユーザーにエラーメッセージを送信
-          try {
-            await lineClient.pushMessage(userId, {
-              type: 'text',
-              text: `申し訳ありません、お送りいただいた動画の処理中にエラーが発生しました。\n\n動画の形式が特殊であるか、ファイルが破損している可能性があります。\n\n別の動画でお試しいただくか、時間をおいて再度お試しください。`
-            });
-            console.info(`エラーメッセージを送信: ${userId}`);
-          } catch (pushError) {
-            console.error("エラーメッセージ送信失敗:", pushError);
+          if (isLikelyValidLineUserId(userId)) {
+            try {
+              await lineClient.pushMessage(userId, {
+                type: 'text',
+                text: `申し訳ありません、お送りいただいた動画の処理中にエラーが発生しました。\n\n動画の形式が特殊であるか、ファイルが破損している可能性があります。\n\n別の動画でお試しいただくか、時間をおいて再度お試しください。`
+              });
+              console.info(`エラーメッセージを送信: ${userId}`);
+            } catch (pushError) {
+              console.error("エラーメッセージ送信失敗:", pushError);
+            }
+          } else {
+            console.warn('LINE Pushをスキップ: 無効なユーザーIDのため', userId);
           }
         }
 
@@ -130,6 +144,13 @@ export const lineWebhookRouter = onRequest(
         
         const userId = event.source.userId;
         const text = event.message.text;
+
+        const guardResult = await checkProcessingGuards({ userId, contentType: 'text' });
+        if (!guardResult.allowed) {
+          await notifyGuardDenied({ lineClient, replyToken: event.replyToken, userId, guardResult });
+          res.status(200).send('OK');
+          return;
+        }
         
         // 即時受付返信を送信
         const replyMessage = {
@@ -145,7 +166,6 @@ export const lineWebhookRouter = onRequest(
         // Difyで会話を処理（非同期）
         try {
           // Firestoreから会話IDを取得（存在する場合）
-          const firestore = admin.firestore();
           const userDoc = await firestore.collection('users').doc(userId).get();
           const conversationId = userDoc.exists ? userDoc.data().conversation_id : null;
           
@@ -165,20 +185,26 @@ export const lineWebhookRouter = onRequest(
           }
           
           // LINEに返信を送信
-          await lineClient.pushMessage(userId, {
-            type: 'text',
-            text: chatResult.answer,
-          });
+          if (isLikelyValidLineUserId(userId)) {
+            await lineClient.pushMessage(userId, {
+              type: 'text',
+              text: chatResult.answer,
+            });
+          } else {
+            console.warn('LINE Pushをスキップ: 無効なユーザーIDのため', userId);
+          }
           
           console.info(`Dify会話処理成功: ${chatResult.answer.substring(0, 50)}...`);
         } catch (error) {
           console.error('Dify会話処理エラー:', error);
           // エラー時はフォールバックメッセージを送信
           try {
-            await lineClient.pushMessage(userId, {
-              type: 'text',
-              text: 'すみません、もう一度お願いします。',
-            });
+            if (isLikelyValidLineUserId(userId)) {
+              await lineClient.pushMessage(userId, {
+                type: 'text',
+                text: 'すみません、もう一度お願いします。',
+              });
+            }
           } catch (pushError) {
             console.error('LINE pushエラー:', pushError);
           }

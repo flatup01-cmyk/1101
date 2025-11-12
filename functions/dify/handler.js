@@ -1,51 +1,9 @@
+import crypto from 'crypto';
 import fetch from 'node-fetch';
 import admin from 'firebase-admin';
 import { analyzeVideoBlocking } from './dify.js';
 import { analyzeVideoStreaming } from './dify_streaming.js';
 import { buildFallbackAnswer, requireEnv } from './util.js';
-
-/**
- * Translate Japanese text to English using Dify API.
- * @param {string} japaneseText
- * @returns {Promise<string | null>}
- */
-async function translateToEnglish(japaneseText) {
-  try {
-    const apiKey = requireEnv('DIFY_API_KEY');
-    
-    // Dify APIで英語翻訳を取得
-    // 注意: これは簡易実装です。実際にはDifyのワークフローで
-    // 日本語と英語の両方を返すように設定することを推奨します
-    const requestBody = {
-      query: `以下の日本語のテキストを英語に翻訳してください。翻訳のみを返してください:\n\n${japaneseText}`,
-      inputs: { source: 'line' },
-      response_mode: 'blocking',
-      user: 'system',
-    };
-
-    const res = await fetch('https://api.dify.ai/v1/chat-messages', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!res.ok) {
-      console.error('英語翻訳APIエラー:', res.status, res.statusText);
-      return null;
-    }
-
-    const json = await res.json();
-    return typeof json.answer === 'string' && json.answer.trim().length
-      ? json.answer.trim()
-      : null;
-  } catch (error) {
-    console.error('英語翻訳エラー:', error);
-    return null;
-  }
-}
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -53,6 +11,77 @@ if (!admin.apps.length) {
 
 const firestore = admin.firestore();
 const serverTimestamp = admin.firestore.FieldValue.serverTimestamp;
+
+const CACHE_COLLECTION = 'response_cache';
+const CACHE_TTL_SECONDS = 7 * 24 * 60 * 60;
+const MAX_JA_CHARS = 180;
+const MAX_EN_WORDS = 120;
+
+const OVERLOAD_FALLBACK = {
+  jp: '現在AIが混み合っています。しばらくしてから再試行してください。',
+  en: 'The AI is overloaded. Please retry after a short wait.',
+};
+
+function createHashKey(type, input) {
+  return crypto.createHash('sha256').update(`${type}:${input}`).digest('hex');
+}
+
+function truncateJapanese(text, maxChars) {
+  if (!text) return '';
+  if ([...text].length <= maxChars) return text.trim();
+  return [...text].slice(0, maxChars).join('').trim();
+}
+
+function truncateEnglishWords(text, maxWords) {
+  if (!text) return '';
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length <= maxWords) return text.trim();
+  return words.slice(0, maxWords).join(' ').trim();
+}
+
+function buildFinalMessage(jaSummary, enSummary) {
+  const jp = `別に長くは話さないわ。${jaSummary} 最後に一言。続けるなら、今日からね。`;
+  const en = `Not overexplaining. ${enSummary} One last thing: progress comes from consistency—start today.`;
+  return `${jp}\n\n${en}`;
+}
+
+async function getCachedResponse(cacheKey) {
+  try {
+    const docRef = firestore.collection(CACHE_COLLECTION).doc(cacheKey);
+    const snapshot = await docRef.get();
+    if (!snapshot.exists) return null;
+    const data = snapshot.data();
+    const expiresAt = data.expires_at;
+    if (!expiresAt || expiresAt.toMillis() < Date.now()) {
+      await docRef.delete().catch(() => {});
+      return null;
+    }
+    return data.payload ?? null;
+  } catch (error) {
+    console.error('キャッシュ取得エラー:', error);
+    return null;
+  }
+}
+
+async function saveCachedResponse(cacheKey, payload) {
+  try {
+    const docRef = firestore.collection(CACHE_COLLECTION).doc(cacheKey);
+    const expiresAt = admin.firestore.Timestamp.fromMillis(
+      Date.now() + CACHE_TTL_SECONDS * 1000,
+    );
+    await docRef.set(
+      {
+        payload,
+        expires_at: expiresAt,
+        created_at: serverTimestamp(),
+        updated_at: serverTimestamp(),
+      },
+      { merge: true },
+    );
+  } catch (error) {
+    console.error('キャッシュ保存エラー:', error);
+  }
+}
 
 /**
  * Send a push message via LINE Messaging API.
@@ -149,6 +178,44 @@ export async function handleVideoJob({
 
   const analyzer = selectStreaming ? analyzeVideoStreaming : analyzeVideoBlocking;
 
+  const cacheKey = createHashKey('video', videoUrl);
+  const cached = await getCachedResponse(cacheKey);
+  if (cached && cached.finalMessage) {
+    console.info('キャッシュから動画解析結果を返却します');
+    let lineError;
+    try {
+      await sendLineMessage(lineUserId, cached.finalMessage);
+    } catch (error) {
+      lineError = error;
+    }
+
+    const jobPayload = {
+      status: lineError ? 'line_failed' : 'completed_cached',
+      conversation_id: cached.conversationId ?? null,
+      dify_mode: selectStreaming ? 'streaming' : 'blocking',
+      dify_meta: cached.meta ?? {},
+      last_message: cached.finalMessage,
+      cache_hit: true,
+      ...extraJobData,
+    };
+    if (lineError) {
+      jobPayload.line_error = lineError.message;
+    }
+
+    await updateJobDocument(jobId, jobPayload);
+
+    if (lineError) {
+      throw lineError;
+    }
+
+    return {
+      answer: cached.finalMessage,
+      conversation_id: cached.conversationId ?? null,
+      meta: cached.meta ?? {},
+      cache_hit: true,
+    };
+  }
+
   let difyResult;
   try {
     difyResult = await analyzer({ videoUrl, userId, conversationId });
@@ -168,26 +235,37 @@ export async function handleVideoJob({
   const { answer, meta, conversation_id: newConversationId } = difyResult;
   const effectiveConversationId = newConversationId ?? conversationId ?? null;
 
-  // 日本語の後に英語も追加
-  // Difyの結果が日本語の場合、英語の翻訳を追加
-  let finalAnswer = answer;
+  let jaSummary = '';
+  let enSummary = '';
+
   try {
-    // 英語翻訳を追加（簡易版：Difyに英語も含めて返すようにプロンプトを調整するか、
-    // または別のDify API呼び出しで翻訳を取得）
-    // ここでは、Difyの結果に英語を追加するための処理を追加
-    // 実際の実装では、Difyのプロンプトを調整して日本語と英語の両方を返すようにするか、
-    // 別のAPI呼び出しで翻訳を取得する必要があります
-    
-    // 簡易実装：Difyの結果に英語を追加するための関数を呼び出す
-    const englishTranslation = await translateToEnglish(answer);
-    if (englishTranslation) {
-      finalAnswer = `${answer}\n\n--- English ---\n${englishTranslation}`;
+    const parsed = JSON.parse(answer);
+    if (parsed && typeof parsed === 'object') {
+      if (typeof parsed.ja_summary === 'string') {
+        jaSummary = parsed.ja_summary;
+      }
+      if (typeof parsed.en_summary === 'string') {
+        enSummary = parsed.en_summary;
+      }
     }
   } catch (error) {
-    console.error('英語翻訳エラー:', error);
-    // 翻訳エラーが発生しても、日本語の結果は送信する
-    finalAnswer = answer;
+    console.error('Dify応答のJSON解析に失敗しました:', {
+      error: error.message,
+      answer,
+    });
   }
+
+  if (!jaSummary) {
+    jaSummary = OVERLOAD_FALLBACK.jp;
+  }
+  if (!enSummary) {
+    enSummary = OVERLOAD_FALLBACK.en;
+  }
+
+  jaSummary = truncateJapanese(jaSummary, MAX_JA_CHARS);
+  enSummary = truncateEnglishWords(enSummary, MAX_EN_WORDS);
+
+  const finalAnswer = buildFinalMessage(jaSummary, enSummary);
 
   let lineError;
   try {
@@ -202,7 +280,7 @@ export async function handleVideoJob({
     conversation_id: effectiveConversationId,
     dify_mode: selectStreaming ? 'streaming' : 'blocking',
     dify_meta: meta ?? {},
-    last_message: answer,
+    last_message: finalAnswer,
     ...extraJobData,
   };
 
@@ -212,12 +290,18 @@ export async function handleVideoJob({
 
   await updateJobDocument(jobId, jobPayload);
 
+  await saveCachedResponse(cacheKey, {
+    finalMessage: finalAnswer,
+    conversationId: effectiveConversationId,
+    meta: meta ?? {},
+  });
+
   if (lineError) {
     throw lineError;
   }
 
   return {
-    answer,
+    answer: finalAnswer,
     conversation_id: effectiveConversationId,
     meta,
   };

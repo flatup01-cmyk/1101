@@ -10,9 +10,18 @@ Firebase Storage自動削除機能
 import os
 from datetime import datetime, timedelta
 from google.cloud import storage
+from gcloud_auth import get_storage_client_with_auth, validate_gcp_project_id
 
 # Cloud Storageクライアント
-storage_client = storage.Client()
+# 指示書に従い、認証ユーティリティを使用してクライアントを初期化
+storage_client = None
+
+def get_storage_client():
+    """Storageクライアントを取得（遅延初期化）"""
+    global storage_client
+    if storage_client is None:
+        storage_client = get_storage_client_with_auth()
+    return storage_client
 
 # 設定
 # バケット名をフロントエンドと統一（新しいFirebase Storage形式）
@@ -33,7 +42,9 @@ def cleanup_old_videos(request):
     """
     print("🧹 Storage自動削除処理を開始します...")
     
-    bucket = storage_client.bucket(BUCKET_NAME)
+    # 指示書に従い、認証ユーティリティを使用してクライアントを取得
+    client = get_storage_client()
+    bucket = client.bucket(BUCKET_NAME)
     
     # videos/フォルダ内のすべてのファイルを取得
     blobs = list(bucket.list_blobs(prefix='videos/'))
