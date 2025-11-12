@@ -21,6 +21,7 @@ import hashlib
 import traceback
 import cv2
 import time
+import random
 from datetime import datetime
 from google.cloud import storage, firestore
 from google.cloud.secretmanager_v1 import SecretManagerServiceClient
@@ -184,8 +185,17 @@ def call_dify_via_mcp(scores, user_id):
 
     for attempt, delay in enumerate(retry_delays, start=1):
         if delay > 0:
-            logger.info(f"⏳ Dify再試行待機 {delay} 秒 (attempt {attempt})")
-            time.sleep(delay)
+            jitter = delay * (random.uniform(-0.1, 0.1))
+            wait_seconds = max(0.0, delay + jitter)
+            log_structured(
+                logging.WARNING,
+                "Dify retry backoff",
+                attempt=attempt,
+                base_delay=delay,
+                jitter=round(jitter, 3),
+                wait=round(wait_seconds, 3),
+            )
+            time.sleep(wait_seconds)
 
         try:
             response = requests.post(
@@ -224,25 +234,52 @@ def call_dify_via_mcp(scores, user_id):
             is_overloaded = any(keyword in lower_body for keyword in ['overloaded', 'please try again later', 'unavailable'])
 
             if status_code in (429, 500, 502, 503, 504) or is_overloaded:
-                logger.warning(f"⚠️ Difyが過負荷または一時エラー: status={status_code}, attempt={attempt}")
-                logger.debug(f"Difyレスポンス: {body_text}")
+                log_structured(
+                    logging.WARNING,
+                    "Dify retryable http error",
+                    attempt=attempt,
+                    status=status_code,
+                    statusText=http_error.response.status_text if http_error.response else "",
+                    body=body_text[:500] if body_text else ""
+                )
                 if attempt < len(retry_delays):
                     continue
             else:
-                logger.error(f"❌ Dify MCP HTTPエラー: status={status_code}, body={body_text}")
+                log_structured(
+                    logging.ERROR,
+                    "Dify non-retryable http error",
+                    status=status_code,
+                    statusText=http_error.response.status_text if http_error.response else "",
+                    body=body_text[:500] if body_text else ""
+                )
                 return None
 
         except requests.exceptions.RequestException as req_error:
             last_error_response = str(req_error)
-            logger.warning(f"⚠️ Dify MCPリクエスト例外 (attempt {attempt}): {req_error}")
+            log_structured(
+                logging.WARNING,
+                "Dify network/timeout error",
+                attempt=attempt,
+                error=str(req_error)
+            )
             if attempt < len(retry_delays):
                 continue
         except Exception as e:
-            logger.error(f"❌ Dify MCP呼び出しエラー: {str(e)}")
+            log_structured(
+                logging.ERROR,
+                "Dify unexpected exception",
+                attempt=attempt,
+                error=str(e)
+            )
             traceback.print_exc()
             return None
 
-    logger.error(f"❌ Dify MCP呼び出し失敗（全リトライ失敗）: status={last_status_code}, response={last_error_response}")
+    log_structured(
+        logging.ERROR,
+        "Dify fallback response",
+        status=last_status_code,
+        response=(last_error_response[:500] if isinstance(last_error_response, str) else str(last_error_response))
+    )
     # ユーザー向けメッセージとして返すことで、エラー時にも丁寧な案内を維持
     return "…ちょっと待ちなさい。今はAIが込み合ってるみたい。数分おいてから、もう一度動画を送ってちょうだい。"
 
@@ -746,7 +783,10 @@ def process_video(data, context):
         return {"status": "error", "reason": str(e)}
 
 
-
+# --- Logging Utilities ---
+def log_structured(level, message, **fields):
+    payload = {"message": message, **fields}
+    logger.log(level, json.dumps(payload, ensure_ascii=False))
 
 
 # Firebase Storage トリガー関数（CloudEvent形式・Cloud Storage v2仕様対応）
