@@ -14,6 +14,178 @@ setGlobalOptions({region: "asia-northeast1"});
 
 // 定数定義
 const LINE_VERIFY_REPLY_TOKEN = '00000000000000000000000000000000';
+const firestore = admin.firestore();
+const serverTimestamp = admin.firestore.FieldValue.serverTimestamp;
+
+const STORAGE_LIMIT_BYTES = Math.floor(4.9 * 1024 * 1024 * 1024); // 約4.9GB
+const STORAGE_USAGE_DOC = firestore.doc('system_settings/storageUsage');
+const STORAGE_USAGE_CACHE_MS = 5 * 60 * 1000;
+const PROCESSING_GUARD_DOC = firestore.doc('system_settings/processingGuard');
+const USER_USAGE_COL = firestore.collection('user_usage');
+const QUOTA_LIMITS = {
+  video: 1,
+  image: 3,
+  text: 5,
+};
+
+const STOP_RESPONSE = '現在混雑のため受付を停止しています。時間をおいてからもう一度試しなさい。\n\n---\n[English]\nRequests are temporarily paused due to heavy load. Please try again later.';
+const STORAGE_FULL_RESPONSE = '現在ストレージが満杯です。数日後に再度お試しください。\n\n---\n[English]\nStorage is full. Please try again in a few days.';
+const QUOTA_RESPONSE = '本日の無料枠は終了しました。明日また試してください。\n\n---\n[English]\nYour free quota for today has been reached. Please try again tomorrow.';
+
+async function sendLineText(lineClient, replyToken, userId, message) {
+  if (replyToken && replyToken !== LINE_VERIFY_REPLY_TOKEN) {
+    try {
+      await lineClient.replyMessage(replyToken, { type: 'text', text: message });
+      return true;
+    } catch (error) {
+      console.warn('Reply失敗のためPushにフォールバック:', error?.message);
+    }
+  }
+  if (!userId) return false;
+  try {
+    await lineClient.pushMessage(userId, { type: 'text', text: message });
+    return true;
+  } catch (pushError) {
+    console.error('Pushメッセージ送信失敗:', pushError);
+    return false;
+  }
+}
+
+async function isProcessingDisabled() {
+  try {
+    const snap = await PROCESSING_GUARD_DOC.get();
+    const data = snap.exists ? snap.data() : null;
+    return Boolean(data?.isDisabled);
+  } catch (error) {
+    console.error('停止フラグ取得エラー:', error);
+    return false;
+  }
+}
+
+async function getCachedStorageUsage() {
+  try {
+    const snap = await STORAGE_USAGE_DOC.get();
+    if (!snap.exists) return null;
+    const data = snap.data();
+    const checkedAt = data.checkedAt?.toMillis();
+    if (!checkedAt) return null;
+    const age = Date.now() - checkedAt;
+    if (age > STORAGE_USAGE_CACHE_MS) return null;
+    return data.totalBytes ?? null;
+  } catch (error) {
+    console.error('ストレージ使用量キャッシュ取得エラー:', error);
+    return null;
+  }
+}
+
+async function calculateStorageUsageBytes(bucket) {
+  let totalBytes = 0;
+  try {
+    const [files] = await bucket.getFiles();
+    for (const file of files) {
+      const size = Number(file.metadata?.size || 0);
+      if (!Number.isNaN(size)) {
+        totalBytes += size;
+      }
+    }
+  } catch (error) {
+    console.error('ストレージ使用量計算エラー:', error);
+    throw error;
+  }
+  return totalBytes;
+}
+
+async function ensureStorageCapacity(bucket) {
+  let totalBytes = await getCachedStorageUsage();
+  if (totalBytes === null) {
+    totalBytes = await calculateStorageUsageBytes(bucket);
+    try {
+      await STORAGE_USAGE_DOC.set(
+        {
+          totalBytes,
+          checkedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+    } catch (cacheError) {
+      console.error('ストレージ使用量キャッシュ更新エラー:', cacheError);
+    }
+  }
+  return totalBytes < STORAGE_LIMIT_BYTES;
+}
+
+function usageDocId(userId, dateKey) {
+  return `${userId}_${dateKey}`;
+}
+
+function getTodayKey() {
+  const now = new Date();
+  const y = now.getUTCFullYear();
+  const m = `${now.getUTCMonth() + 1}`.padStart(2, '0');
+  const d = `${now.getUTCDate()}`.padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+async function checkAndIncrementQuota(userId, requestType) {
+  const limit = QUOTA_LIMITS[requestType];
+  if (!limit) return true;
+  const todayKey = getTodayKey();
+  const docRef = USER_USAGE_COL.doc(usageDocId(userId, todayKey));
+
+  try {
+    return await firestore.runTransaction(async (transaction) => {
+      const snap = await transaction.get(docRef);
+      const data = snap.exists ? snap.data() : {};
+      const currentCount = Number(data[requestType] || 0);
+      if (currentCount >= limit) {
+        return false;
+      }
+      const updateData = {
+        dateKey: todayKey,
+        [requestType]: currentCount + 1,
+        updatedAt: serverTimestamp(),
+      };
+      if (!snap.exists) {
+        updateData.createdAt = serverTimestamp();
+        for (const key of Object.keys(QUOTA_LIMITS)) {
+          if (key !== requestType && !(key in updateData)) {
+            updateData[key] = 0;
+          }
+        }
+      }
+      transaction.set(docRef, updateData, { merge: true });
+      return true;
+    });
+  } catch (error) {
+    console.error('クォータ更新エラー:', error);
+    // エラー時は安全側（許可）で進める
+    return true;
+  }
+}
+
+async function runProcessingGuards({ lineClient, replyToken, userId, requestType }) {
+  // Firestore停止フラグ
+  if (await isProcessingDisabled()) {
+    await sendLineText(lineClient, replyToken, userId, STOP_RESPONSE);
+    return { allowed: false, status: 503 };
+  }
+
+  const bucket = admin.storage().bucket();
+  const hasCapacity = await ensureStorageCapacity(bucket);
+  if (!hasCapacity) {
+    await sendLineText(lineClient, replyToken, userId, STORAGE_FULL_RESPONSE);
+    return { allowed: false, status: 503 };
+  }
+
+  const quotaOk = await checkAndIncrementQuota(userId, requestType);
+  if (!quotaOk) {
+    await sendLineText(lineClient, replyToken, userId, QUOTA_RESPONSE);
+    return { allowed: false, status: 429 };
+  }
+
+  return { allowed: true };
+}
 
 /**
  * LINE Webhook署名検証関数
@@ -149,15 +321,26 @@ export const lineWebhookRouter = onRequest(
           });
           console.info(`Dify処理関数 (processVideoJob) の呼び出しを開始しました。`);
         } catch (error) {
-          console.error("動画処理エラー:", error);
+          console.error("動画処理エラーを検知しました（静的失敗の可能性）:", {
+            userId,
+            messageId,
+            sourceType,
+            errorMessage: error?.message,
+            stack: error?.stack,
+          });
           // エラー時も必ずメッセージを返す
           try {
             await lineClient.pushMessage(userId, {
               type: 'text',
-              text: '…チッ、動画の処理中にエラーが発生したわ。もう一度送り直してみなさい。\n\n---\n[English]\nAn error occurred while processing your video. Please try again.'
+              text: '申し訳ありません。動画の処理中にエラーが発生しました。\n\n動画の形式（HEVC/H.265 など特殊コーデック）やファイル破損が原因の可能性があります。時間をおいて再送いただくか、別形式で撮影した動画でお試しください。\n\n---\n[English]\nWe could not process this video. It may use an unsupported format or be corrupted. Please retry later or send another recording.'
             });
           } catch (pushError) {
-            console.error("LINEメッセージ送信エラー:", pushError);
+            console.error("動画処理エラー通知の送信にも失敗しました:", {
+              userId,
+              messageId,
+              pushErrorMessage: pushError?.message,
+              stack: pushError?.stack,
+            });
           }
           // LINEには既にOKを返しているので、ここでは何もしない
         }

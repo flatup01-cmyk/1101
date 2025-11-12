@@ -113,28 +113,40 @@ async function createVideoJob(userId, lineUserId, fileName) {
  * @returns {Promise<void>}
  */
 export async function uploadVideoToStorage(videoFile, userId, lineUserId, progressCallback) {
-    if (!userId || !/^[a-zA-Z0-9_-]+$/.test(userId)) {
-        console.error('❌ Invalid userId:', userId);
-        throw new Error('不正なユーザーIDです。');
-    }
-    if (!lineUserId || !/^[a-zA-Z0-9_-]+$/.test(lineUserId)) {
-        console.error('❌ Invalid lineUserId:', lineUserId);
-        throw new Error('不正なLINEユーザーIDです。');
+    const sanitizedUserId = typeof userId === 'string' ? userId.trim() : String(userId ?? '').trim();
+    const sanitizedLineUserId = typeof lineUserId === 'string' ? lineUserId.trim() : String(lineUserId ?? '').trim();
+
+    if (!sanitizedUserId) {
+        console.error('❌ Invalid userId (empty):', userId);
+        throw new Error('不正なユーザーIDです。LINEアプリでログインし直してください。');
     }
 
-    console.log(`📤 Upload request - User: ${userId}, LineUser: ${lineUserId}, File: ${videoFile.name}, Size: ${(videoFile.size / 1024 / 1024).toFixed(2)}MB`);
+    if (!sanitizedLineUserId) {
+        console.error('❌ Invalid lineUserId (empty):', lineUserId);
+        throw new Error('LINEのユーザー情報を取得できませんでした。LINEアプリから開き直してください。');
+    }
+
+    // LINEユーザーIDは通常「U」から始まる32桁の16進数だが、開発モード等で異なる形式になる場合もある。
+    // ここでは安全な文字のみ許可しつつ、幅広いケースに対応する。
+    const safeIdPattern = /^[a-zA-Z0-9_\-]+$/;
+    if (!safeIdPattern.test(sanitizedLineUserId)) {
+        console.error('❌ Invalid lineUserId (unsafe characters):', sanitizedLineUserId);
+        throw new Error('不正なLINEユーザーIDです。LINEアプリでログインし直してください。');
+    }
+
+    console.log(`📤 Upload request - User: ${sanitizedUserId}, LineUser: ${sanitizedLineUserId}, File: ${videoFile.name}, Size: ${(videoFile.size / 1024 / 1024).toFixed(2)}MB`);
 
     // 1. Create a job document in Firestore first.
     let jobId;
     try {
-        jobId = await createVideoJob(userId, lineUserId, videoFile.name);
+        jobId = await createVideoJob(sanitizedUserId, sanitizedLineUserId, videoFile.name);
     } catch (error) {
         console.error('❌ Job creation failed:', error);
         throw error; // エラーをそのまま伝播
     }
 
     // 2. Define the storage path using the job ID for integrity.
-    const storagePath = `videos/${userId}/${jobId}/${videoFile.name}`;
+    const storagePath = `videos/${sanitizedUserId}/${jobId}/${videoFile.name}`;
     const storageRef = ref(storage, storagePath);
 
     console.log(`🚀 Starting upload for job ${jobId} to ${storagePath}`);

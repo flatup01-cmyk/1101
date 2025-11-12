@@ -20,6 +20,7 @@ import logging
 import hashlib
 import traceback
 import cv2
+import time
 from datetime import datetime
 from google.cloud import storage, firestore
 from google.cloud.secretmanager_v1 import SecretManagerServiceClient
@@ -144,80 +145,106 @@ def call_dify_via_mcp(scores, user_id):
         logger.error("Firebase Console → Functions → 環境変数で設定してください")
         return None
     
-    try:
-        headers = {
-            'Authorization': f'Bearer {DIFY_API_KEY}',
-            'Content-Type': 'application/json'
+    headers = {
+        'Authorization': f'Bearer {DIFY_API_KEY}',
+        'Content-Type': 'application/json'
+    }
+    
+    # MCPプロトコル形式のリクエスト
+    # Difyの標準APIを使用し、MCP互換の形式でデータを送信
+    mcp_payload = {
+        # MCPスタイル: ツール呼び出し形式
+        'method': 'chat',
+        'params': {
+            'inputs': {
+                'punch_speed_score': str(scores.get('punch_speed', 0)),
+                'guard_stability_score': str(scores.get('guard_stability', 0)),
+                'kick_height_score': str(scores.get('kick_height', 0)),
+                'core_rotation_score': str(scores.get('core_rotation', 0))
+            },
+            'user': user_id,
+            'response_mode': 'blocking'
         }
-        
-        # MCPプロトコル形式のリクエスト
-        # Difyの標準APIを使用し、MCP互換の形式でデータを送信
-        mcp_payload = {
-            # MCPスタイル: ツール呼び出し形式
-            'method': 'chat',
-            'params': {
-                'inputs': {
-                    'punch_speed_score': str(scores.get('punch_speed', 0)),
-                    'guard_stability_score': str(scores.get('guard_stability', 0)),
-                    'kick_height_score': str(scores.get('kick_height', 0)),
-                    'core_rotation_score': str(scores.get('core_rotation', 0))
-                },
-                'user': user_id,
-                'response_mode': 'blocking'
+    }
+    
+    # 実際にはDifyの標準APIを使用
+    # MCPスタイルのデータを標準形式に変換
+    payload = {
+        'query': '動画解析結果をもとにAIKA18号として返答してください',
+        'inputs': mcp_payload['params']['inputs'],
+        'user': mcp_payload['params']['user'],
+        'response_mode': mcp_payload['params']['response_mode']
+    }
+    
+    logger.info(f"📤 Dify MCP呼び出し: {json.dumps(payload, ensure_ascii=False)}")
+
+    retry_delays = [0, 5, 15, 30]  # 秒
+    last_error_response = None
+    last_status_code = None
+
+    for attempt, delay in enumerate(retry_delays, start=1):
+        if delay > 0:
+            logger.info(f"⏳ Dify再試行待機 {delay} 秒 (attempt {attempt})")
+            time.sleep(delay)
+
+        try:
+            response = requests.post(
+                DIFY_API_ENDPOINT,
+                headers=headers,
+                json=payload,
+                timeout=30
+            )
+            response.raise_for_status()
+            result = response.json()
+
+            message = result.get('answer', result.get('text', ''))
+            mcp_response = {
+                'result': {
+                    'content': message,
+                    'format': 'text'
+                }
             }
-        }
-        
-        # 実際にはDifyの標準APIを使用
-        # MCPスタイルのデータを標準形式に変換
-        payload = {
-            'query': '動画解析結果をもとにAIKA18号として返答してください',
-            'inputs': mcp_payload['params']['inputs'],
-            'user': mcp_payload['params']['user'],
-            'response_mode': mcp_payload['params']['response_mode']
-        }
-        
-        logger.info(f"📤 Dify MCP呼び出し: {json.dumps(payload, ensure_ascii=False)}")
-        
-        response = requests.post(
-            DIFY_API_ENDPOINT,
-            headers=headers,
-            json=payload,
-            timeout=30
-        )
-        
-        response.raise_for_status()
-        result = response.json()
-        
-        # MCPスタイルのレスポンスを処理
-        # Difyの標準レスポンスからメッセージを取得
-        message = result.get('answer', result.get('text', ''))
-        
-        # MCPスタイルのレスポンス構造に変換（将来の拡張用）
-        mcp_response = {
-            'result': {
-                'content': message,
-                'format': 'text'
-            }
-        }
-        
-        if message:
-            logger.info(f"✅ Dify MCP成功: {message[:50]}...")
-            logger.debug(f"MCPレスポンス: {json.dumps(mcp_response, ensure_ascii=False)}")
-            return message
-        else:
+
+            if message:
+                logger.info(f"✅ Dify MCP成功: {message[:50]}...")
+                logger.debug(f"MCPレスポンス: {json.dumps(mcp_response, ensure_ascii=False)}")
+                return message
+
             logger.warning("⚠️ Dify MCPからメッセージが取得できませんでした")
             logger.debug(f"Difyレスポンス: {json.dumps(result, ensure_ascii=False)}")
             return None
-            
-    except requests.exceptions.RequestException as e:
-        logger.error(f"❌ Dify MCP APIエラー: {str(e)}")
-        if hasattr(e, 'response') and e.response is not None:
-            logger.error(f"レスポンス: {e.response.text}")
-        return None
-    except Exception as e:
-        logger.error(f"❌ Dify MCP呼び出しエラー: {str(e)}")
-        traceback.print_exc()
-        return None
+
+        except requests.exceptions.HTTPError as http_error:
+            status_code = http_error.response.status_code if http_error.response else None
+            body_text = http_error.response.text if http_error.response else ''
+            last_error_response = body_text
+            last_status_code = status_code
+
+            lower_body = body_text.lower() if isinstance(body_text, str) else ''
+            is_overloaded = any(keyword in lower_body for keyword in ['overloaded', 'please try again later', 'unavailable'])
+
+            if status_code in (429, 500, 502, 503, 504) or is_overloaded:
+                logger.warning(f"⚠️ Difyが過負荷または一時エラー: status={status_code}, attempt={attempt}")
+                logger.debug(f"Difyレスポンス: {body_text}")
+                if attempt < len(retry_delays):
+                    continue
+            else:
+                logger.error(f"❌ Dify MCP HTTPエラー: status={status_code}, body={body_text}")
+                return None
+
+        except requests.exceptions.RequestException as req_error:
+            last_error_response = str(req_error)
+            logger.warning(f"⚠️ Dify MCPリクエスト例外 (attempt {attempt}): {req_error}")
+            if attempt < len(retry_delays):
+                continue
+        except Exception as e:
+            logger.error(f"❌ Dify MCP呼び出しエラー: {str(e)}")
+            traceback.print_exc()
+            return None
+
+    logger.error(f"❌ Dify MCP呼び出し失敗（全リトライ失敗）: status={last_status_code}, response={last_error_response}")
+    # ユーザー向けメッセージとして返すことで、エラー時にも丁寧な案内を維持
+    return "…ちょっと待ちなさい。今はAIが込み合ってるみたい。数分おいてから、もう一度動画を送ってちょうだい。"
 
 
 def send_line_message_simple(user_id, message):
@@ -435,14 +462,27 @@ def process_video(data, context):
             return {"status": "error", "reason": "invalid path"}
         
         # ファイルパスからユーザーIDとjobIdを抽出
-        # パス構造: videos/{userId}/{jobId}/{fileName}
+        # サポートするパス構造:
+        #   1. videos/{userId}/{jobId}/{fileName}          新方式（推奨）
+        #   2. videos/{userId}/{fileName}                 旧方式（後方互換）
+        #      └ jobId は fileName の拡張子を除いた部分として扱う
         path_parts = file_path.split('/')
-        if len(path_parts) < 4:
+        if len(path_parts) < 3:
             logger.error(f"❌ セキュリティ: パス構造が不正: {file_path}")
             return {"status": "error", "reason": "invalid path structure"}
         
         user_id = path_parts[1]
-        job_id = path_parts[2] if len(path_parts) >= 3 else None
+        job_id = None
+        file_name = None
+
+        if len(path_parts) >= 4:
+            job_id = path_parts[2]
+            file_name = '/'.join(path_parts[3:])
+        else:
+            # 旧方式: videos/{userId}/{fileName}
+            file_name = path_parts[2]
+            job_id = os.path.splitext(file_name)[0] or None
+            logger.info(f"📁 旧方式パスを検出: user_id={user_id}, 推定job_id={job_id}, file={file_name}")
         
         logger.info(f"📁 ユーザーID抽出: {user_id}, JobID抽出: {job_id}")
         

@@ -318,11 +318,26 @@ async function initLiff() {
             setTimeout(() => reject(new Error('プロファイル取得タイムアウト')), 10000)
           )
         ]);
-        
-        if (profile && profile.userId) {
-          console.log('✅ LIFF profile retrieved:', profile.userId);
-          return profile;
-    }
+
+        let resolvedUserId = profile?.userId ?? '';
+
+        if (!resolvedUserId) {
+          try {
+            const decoded = await liff.getDecodedIDToken();
+            if (decoded?.sub) {
+              resolvedUserId = decoded.sub;
+              console.log('ℹ️ LIFF decoded ID token sub:', resolvedUserId);
+            }
+          } catch (tokenError) {
+            console.warn('⚠️ LIFF decoded ID token fetch failed:', tokenError);
+          }
+        }
+
+        if (resolvedUserId) {
+          const finalProfile = { ...profile, userId: resolvedUserId };
+          console.log('✅ LIFF profile resolved:', resolvedUserId);
+          return finalProfile;
+        }
       } catch (error) {
         console.warn(`⚠️ LIFF profile attempt ${attempt + 1} failed:`, error);
         lastError = error;
