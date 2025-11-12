@@ -462,15 +462,7 @@ def process_video(data, context):
             return {"status": "error", "reason": "invalid path"}
         
         # ファイルパスからユーザーIDとjobIdを抽出
-        # サポートするパス構造:
-        #   1. videos/{userId}/{jobId}/{fileName}          新方式（推奨）
-        #   2. videos/{userId}/{fileName}                 旧方式（後方互換）
-        #      └ jobId は fileName の拡張子を除いた部分として扱う
         path_parts = file_path.split('/')
-        if len(path_parts) < 3:
-            logger.error(f"❌ セキュリティ: パス構造が不正: {file_path}")
-            return {"status": "error", "reason": "invalid path structure"}
-        
         user_id = path_parts[1]
         job_id = None
         file_name = None
@@ -480,11 +472,14 @@ def process_video(data, context):
             file_name = '/'.join(path_parts[3:])
         else:
             # 旧方式: videos/{userId}/{fileName}
-            file_name = path_parts[2]
-            job_id = os.path.splitext(file_name)[0] or None
-            logger.info(f"📁 旧方式パスを検出: user_id={user_id}, 推定job_id={job_id}, file={file_name}")
-        
-        logger.info(f"📁 ユーザーID抽出: {user_id}, JobID抽出: {job_id}")
+            file_name = path_parts[2] if len(path_parts) >= 3 else None
+            job_id = os.path.splitext(file_name)[0] if file_name else None
+            if file_name:
+                logger.info(f"📁 旧方式パスを検出: user_id={user_id}, 推定job_id={job_id}, file={file_name}")
+
+        if not file_name:
+            logger.error(f"❌ セキュリティ: ファイル名が取得できませんでした: {file_path}")
+            return {"status": "error", "reason": "missing file name"}
         
         # ユーザーIDの検証
         if not user_id or not user_id.replace('-', '').replace('_', '').isalnum():
