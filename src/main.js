@@ -1,14 +1,20 @@
 // AIKA-18 UI Revolution - Main Entry Point
 // Perfected by your partner.
+<<<<<<< Current (Your changes)
+// Updated: 2025-11-11 - Menu UI implementation
+=======
+// Updated: 2025-11-11 - UI update for Netlify deployment
+>>>>>>> Incoming (Background Agent changes)
 
 import liff from '@line/liff';
-import { LIFF_CONFIG } from './config.js';
+import { LIFF_CONFIG, FUNCTION_ENDPOINTS } from './config.js';
 import { uploadVideoToStorage, initFirebase, ensureFirebaseAuth } from './firebase.js';
 
 // --- State Management & Constants ---
 
 const appState = {
-  uiState: 'initializing', // initializing, idle, uploading, success, error
+  uiState: 'initializing', // initializing, menu, uploading, success, error
+  currentView: 'menu', // menu, upload
   profile: null,
   selectedFile: null,
   errorMessage: '',
@@ -50,8 +56,10 @@ function renderUI() {
     case 'error':
       html = createErrorView();
       break;
-    case 'idle':
-    default:
+    case 'menu':
+      html = createMenuView();
+      break;
+    case 'upload':
       html = createUploadView();
       break;
     case 'initializing':
@@ -62,19 +70,82 @@ function renderUI() {
         type: 'processing'
       });
       break;
+    default:
+      html = createMenuView();
+      break;
   }
   app.innerHTML = html;
   addEventListeners();
 }
 
+function createMenuView() {
+  return `
+    <div class="menu-container">
+      <div class="menu-header">
+        <div class="menu-character-image">
+          <img src="/images/aika-character.png" alt="AIKA18号" class="character-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+          <div class="character-placeholder" style="display: none;">🥊</div>
+        </div>
+        <h1 class="menu-title">AIKA18号</h1>
+        <p class="menu-subtitle">バトルスコープ</p>
+        <div class="menu-greeting">
+          <p class="greeting-text">…別に、アンタの戦闘力を調べてあげてもいいけど？</p>
+          <p class="greeting-subtext">動画を送ってくれたら、解析してあげるわ。何でも質問してちょうだい。</p>
+        </div>
+      </div>
+      <div class="menu-items">
+        <button class="menu-item" id="menu-upload-video">
+          <div class="menu-item-icon">📹</div>
+          <div class="menu-item-content">
+            <div class="menu-item-title">動画を解析</div>
+            <div class="menu-item-desc">動画をアップロードしてAIKAに解析してもらう</div>
+          </div>
+          <div class="menu-item-arrow">→</div>
+        </button>
+        <button class="menu-item" id="menu-chat">
+          <div class="menu-item-icon">💬</div>
+          <div class="menu-item-content">
+            <div class="menu-item-title">AIKAとチャット</div>
+            <div class="menu-item-desc">何でも質問してね</div>
+          </div>
+          <div class="menu-item-arrow">→</div>
+        </button>
+        <button class="menu-item" id="menu-about" disabled>
+          <div class="menu-item-icon">ℹ️</div>
+          <div class="menu-item-content">
+            <div class="menu-item-title">使い方</div>
+            <div class="menu-item-desc">準備中...</div>
+          </div>
+          <div class="menu-item-arrow">→</div>
+        </button>
+      </div>
+      <div class="menu-footer">
+        <p class="menu-footer-text">…別に、アンタのために作ったわけじゃないんだからね。</p>
+      </div>
+    </div>
+  `;
+}
+
 function createUploadView() {
   return `
     <div class="upload-container">
+      <div class="upload-header">
+        <button class="back-button" id="back-to-menu">← 戻る</button>
+        <h2 class="upload-title">動画を解析</h2>
+      </div>
       <input type="file" id="video-input" accept="video/*" />
       <button id="upload-btn" class="giant-upload-btn">
         <div class="btn-icon">📹</div>
         <div class="btn-text">${TSUN_MESSAGES.idleButton}</div>
       </button>
+      <div class="upload-hint">
+        <p>📋 動画の要件</p>
+        <ul>
+          <li>20秒以内</li>
+          <li>100MB以下</li>
+          <li>対応形式: MP4, MOV, AVI</li>
+        </ul>
+      </div>
     </div>
   `;
 }
@@ -105,20 +176,64 @@ function createFeedbackView(override = {}) {
 }
 
 function createErrorView() {
-  return createFeedbackView({
-    icon: '💢',
-    message: '…チッ、エラーよ。',
-    subMessage: appState.errorMessage || TSUN_MESSAGES.defaultError,
-    type: 'error'
-  });
-    }
+  return `
+    <div class="error-view-container">
+      <div class="upload-header">
+        <button class="back-button" id="back-to-menu-from-error">← 戻る</button>
+        <h2 class="upload-title">エラー</h2>
+      </div>
+      ${createFeedbackView({
+        icon: '💢',
+        message: '…チッ、エラーよ。',
+        subMessage: appState.errorMessage || TSUN_MESSAGES.defaultError,
+        type: 'error'
+      })}
+    </div>
+  `;
+}
 
 // --- Event Handling ---
 
 function addEventListeners() {
+  // メニュー項目のイベント
+  const menuUploadVideo = document.getElementById('menu-upload-video');
+  if (menuUploadVideo) {
+    menuUploadVideo.addEventListener('click', () => {
+      setState({ uiState: 'upload', currentView: 'upload' });
+    });
+  }
+
+  const menuChat = document.getElementById('menu-chat');
+  if (menuChat) {
+    menuChat.addEventListener('click', () => {
+      // チャット機能はLINEのトーク画面で実装済み
+      alert('LINEのトーク画面からAIKAにメッセージを送ってください。何でも質問してね！');
+    });
+  }
+
+  const backToMenu = document.getElementById('back-to-menu');
+  if (backToMenu) {
+    backToMenu.addEventListener('click', () => {
+      setState({ uiState: 'menu', currentView: 'menu', selectedFile: null, errorMessage: '' });
+    });
+  }
+
+  const backToMenuFromError = document.getElementById('back-to-menu-from-error');
+  if (backToMenuFromError) {
+    backToMenuFromError.addEventListener('click', () => {
+      setState({ uiState: 'menu', currentView: 'menu', selectedFile: null, errorMessage: '' });
+    });
+  }
+
+  // アップロードボタンのイベント
   const uploadBtn = document.getElementById('upload-btn');
   if (uploadBtn) {
-    uploadBtn.addEventListener('click', () => document.getElementById('video-input').click());
+    uploadBtn.addEventListener('click', () => {
+      const videoInput = document.getElementById('video-input');
+      if (videoInput) {
+        videoInput.click();
+      }
+    });
   }
 
   const videoInput = document.getElementById('video-input');
@@ -223,12 +338,18 @@ async function handleUpload() {
       }
     };
 
-    await uploadVideoToStorage(appState.selectedFile, appState.profile.userId, onProgress);
-    
+    const uploadResult = await uploadVideoToStorage(appState.selectedFile, appState.profile.userId, onProgress);
+
+    await triggerVideoProcessing({
+      jobId: uploadResult?.jobId,
+      storagePath: uploadResult?.storagePath,
+      lineUserId: uploadResult?.lineUserId ?? appState.profile.userId,
+    });
+
     setState({ uiState: 'success' });
 
-    // Reset after a few seconds
-    setTimeout(() => setState({ uiState: 'idle', selectedFile: null }), 5000);
+    // Reset after a few seconds - return to menu
+    setTimeout(() => setState({ uiState: 'menu', currentView: 'menu', selectedFile: null }), 5000);
 
   } catch (error) {
     console.error('Upload failed:', error);
@@ -236,10 +357,50 @@ async function handleUpload() {
   }
 }
 
+async function triggerVideoProcessing({ jobId, storagePath, lineUserId }) {
+  const endpoint = FUNCTION_ENDPOINTS.notifyVideoUploadUrl;
+  if (!endpoint) {
+    console.warn('⚠️ notifyVideoUploadUrl is not configured. Skipping backend notification.');
+    return;
+  }
+
+  if (!jobId || !storagePath || !lineUserId) {
+    throw new Error('解析ジョブの情報取得に失敗しました。');
+  }
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        jobId,
+        lineUserId,
+        storagePath,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      throw new Error(`解析処理の起動に失敗しました。(${response.status}) ${errorText}`);
+    }
+
+    const result = await response.json().catch(() => ({}));
+    if (!result?.ok) {
+      throw new Error(result?.error || '解析処理の起動に失敗しました。');
+    }
+    console.log('✅ Video processing triggered successfully.');
+  } catch (error) {
+    console.error('notifyVideoUpload error:', error);
+    throw new Error('解析処理の起動に失敗しました。時間をおいて再度お試しください。');
+  }
+}
+
 function handleError(message) {
   setState({ uiState: 'error', errorMessage: message });
-  // Reset after a few seconds
-  setTimeout(() => setState({ uiState: 'idle', errorMessage: '' }), 5000);
+  // Reset after a few seconds - stay on upload view
+  setTimeout(() => setState({ uiState: 'upload', errorMessage: '' }), 5000);
   }
   
 // --- Initialization ---
@@ -262,7 +423,7 @@ async function main() {
       return;
     }
     
-    setState({ uiState: 'idle' });
+    setState({ uiState: 'menu', currentView: 'menu' });
   } catch (error) {
     console.error('Initialization failed:', error);
     handleError(TSUN_MESSAGES.liffError);
