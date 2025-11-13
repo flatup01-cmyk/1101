@@ -1,51 +1,8 @@
 import fetch from 'node-fetch';
 import admin from 'firebase-admin';
-import { analyzeVideoBlocking, handleTextMessage, addEnglishTranslation } from './dify.js';
+import { analyzeVideoBlocking, analyzeImage } from './dify.js';
 import { analyzeVideoStreaming } from './dify_streaming.js';
 import { buildFallbackAnswer, requireEnv } from './util.js';
-
-/**
- * Translate Japanese text to English using Dify API.
- * @param {string} japaneseText
- * @returns {Promise<string | null>}
- */
-async function translateToEnglish(japaneseText) {
-  try {
-    const apiKey = requireEnv('DIFY_API_KEY');
-    
-    // Dify APIで英語翻訳を取得
-    // 注意: これは簡易実装です。実際にはDifyのワークフローで
-    // 日本語と英語の両方を返すように設定することを推奨します
-    const requestBody = {
-      query: `以下の日本語のテキストを英語に翻訳してください。翻訳のみを返してください:\n\n${japaneseText}`,
-      inputs: { source: 'line' },
-      response_mode: 'blocking',
-      user: 'system',
-    };
-
-    const res = await fetch('https://api.dify.ai/v1/chat-messages', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!res.ok) {
-      console.error('英語翻訳APIエラー:', res.status, res.statusText);
-      return null;
-    }
-
-    const json = await res.json();
-    return typeof json.answer === 'string' && json.answer.trim().length
-      ? json.answer.trim()
-      : null;
-  } catch (error) {
-    console.error('英語翻訳エラー:', error);
-    return null;
-  }
-}
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -101,10 +58,10 @@ async function sendLineMessage(to, text) {
  * @param {string} jobId
  * @param {Record<string, any>} payload
  */
-async function updateJobDocument(jobId, payload) {
+async function updateJobDocument(jobId, payload, collectionName = 'video_jobs') {
   if (!jobId) return;
 
-  const docRef = firestore.doc(`video_jobs/${jobId}`);
+  const docRef = firestore.doc(`${collectionName}/${jobId}`);
   await docRef.set(
     {
       ...payload,
@@ -153,7 +110,22 @@ export async function handleVideoJob({
   try {
     difyResult = await analyzer({ videoUrl, userId, conversationId });
   } catch (error) {
-    const fallback = buildFallbackAnswer('解析処理でエラーが発生しました');
+    console.error("動画解析処理でエラーが発生しました:", {
+      error: error.message,
+      stack: error.stack,
+      videoUrl: videoUrl.substring(0, 100) + '...',
+      userId: userId,
+    });
+    
+    // ユーザーにエラーメッセージを送信
+    const fallback = buildFallbackAnswer('解析処理でエラーが発生しました。動画の形式を確認して再度お試しください。');
+    try {
+      await sendLineMessage(lineUserId, fallback);
+      console.info("ユーザーへエラーメッセージを送信しました");
+    } catch (sendError) {
+      console.error("エラーメッセージの送信に失敗しました:", sendError.message);
+    }
+    
     await updateJobDocument(jobId, {
       status: 'error',
       error_message: error.message,
@@ -168,53 +140,45 @@ export async function handleVideoJob({
   const { answer, meta, conversation_id: newConversationId } = difyResult;
   const effectiveConversationId = newConversationId ?? conversationId ?? null;
 
-<<<<<<< Current (Your changes)
-  // Update conversation ID in users collection for conversation continuity
-  if (effectiveConversationId) {
-    await updateConversationId(lineUserId, effectiveConversationId);
-  }
+  let fullMessage = answer;
+  const alreadyHasEnglish =
+    typeof answer === 'string' &&
+    (answer.includes('[English]') ||
+      /---\s*Analysis Results \(English\)/i.test(answer));
 
-  // Difyのプロンプトで日本語と英語の両方を返すようにしているので、
-  // そのまま使用する。もし英語が含まれていない場合は追加の翻訳を試みる。
-  let finalAnswer = answer;
-  
-  // 英語が含まれているかチェック（簡単なチェック）
-  const hasEnglish = /[a-zA-Z]{3,}/.test(answer);
-  if (!hasEnglish) {
-    // 英語が含まれていない場合のみ、追加の翻訳を試みる
+  if (!alreadyHasEnglish) {
+    let englishSummary = '';
     try {
-      console.info('英語が含まれていないため、追加の翻訳を試みます。');
-      finalAnswer = await addEnglishTranslation(answer);
+      const scoreMatches = answer.match(
+        /(?:戦闘力|スコア|パンチ力|キック力|防御力|スタミナ|技術力|スピード|戦闘経験)[：:]\s*(\d+(?:\.\d+)?)/g
+      );
+      if (scoreMatches && scoreMatches.length > 0) {
+        const scores = scoreMatches.map((match) => {
+          const value = match.match(/(\d+(?:\.\d+)?)/);
+          return value ? parseFloat(value[1]) : 0;
+        });
+        const avgScore =
+          scores.reduce((a, b) => a + b, 0) / Math.max(scores.length, 1);
+
+        englishSummary = `\n\n--- Analysis Results (English) ---\n`;
+        englishSummary += `Average Score: ${avgScore.toFixed(1)}/100\n`;
+        englishSummary += `(Scores extracted from analysis: ${scores.length} items)`;
+      } else {
+        englishSummary = `\n\n--- Analysis Results (English) ---\n`;
+        englishSummary += `Video analysis completed successfully.\n`;
+        englishSummary += `Please refer to the Japanese analysis above for detailed results.`;
+      }
     } catch (error) {
-      console.error('English translation failed, using Japanese only:', error);
-      // Continue with Japanese only if translation fails
+      console.error('英語サマリー生成エラー:', error);
+      englishSummary = `\n\n--- Analysis Results (English) ---\nVideo analysis completed.`;
     }
-=======
-  // 日本語の後に英語も追加
-  // Difyの結果が日本語の場合、英語の翻訳を追加
-  let finalAnswer = answer;
-  try {
-    // 英語翻訳を追加（簡易版：Difyに英語も含めて返すようにプロンプトを調整するか、
-    // または別のDify API呼び出しで翻訳を取得）
-    // ここでは、Difyの結果に英語を追加するための処理を追加
-    // 実際の実装では、Difyのプロンプトを調整して日本語と英語の両方を返すようにするか、
-    // 別のAPI呼び出しで翻訳を取得する必要があります
-    
-    // 簡易実装：Difyの結果に英語を追加するための関数を呼び出す
-    const englishTranslation = await translateToEnglish(answer);
-    if (englishTranslation) {
-      finalAnswer = `${answer}\n\n--- English ---\n${englishTranslation}`;
-    }
-  } catch (error) {
-    console.error('英語翻訳エラー:', error);
-    // 翻訳エラーが発生しても、日本語の結果は送信する
-    finalAnswer = answer;
->>>>>>> Incoming (Background Agent changes)
+
+    fullMessage = answer + englishSummary;
   }
 
   let lineError;
   try {
-    await sendLineMessage(lineUserId, finalAnswer);
+    await sendLineMessage(lineUserId, fullMessage);
   } catch (error) {
     lineError = error;
   }
@@ -225,7 +189,8 @@ export async function handleVideoJob({
     conversation_id: effectiveConversationId,
     dify_mode: selectStreaming ? 'streaming' : 'blocking',
     dify_meta: meta ?? {},
-    last_message: answer,
+    last_message: fullMessage, // 英語サマリーを含む完全なメッセージ
+    original_answer: answer, // 元のDify APIレスポンスも保存
     ...extraJobData,
   };
 
@@ -240,95 +205,91 @@ export async function handleVideoJob({
   }
 
   return {
-    answer: finalAnswer,
+    answer: fullMessage, // 英語サマリーを含む完全なメッセージを返す
     conversation_id: effectiveConversationId,
     meta,
   };
 }
 
 /**
- * Get or create conversation ID for a user from Firestore.
- * @param {string} lineUserId LINE user ID
- * @returns {Promise<string | null>}
- */
-async function getConversationId(lineUserId) {
-  try {
-    const userDoc = await firestore.doc(`users/${lineUserId}`).get();
-    if (userDoc.exists) {
-      const data = userDoc.data();
-      return data.conversation_id || null;
-    }
-    return null;
-  } catch (error) {
-    console.error('Error getting conversation ID:', error);
-    return null;
-  }
-}
-
-/**
- * Update conversation ID for a user in Firestore.
- * @param {string} lineUserId LINE user ID
- * @param {string | null} conversationId
- */
-async function updateConversationId(lineUserId, conversationId) {
-  try {
-    await firestore.doc(`users/${lineUserId}`).set(
-      {
-        conversation_id: conversationId,
-        updated_at: serverTimestamp(),
-      },
-      { merge: true }
-    );
-  } catch (error) {
-    console.error('Error updating conversation ID:', error);
-  }
-}
-
-/**
- * Handle text message from LINE user.
+ * Orchestrate image analysis (fight card prediction etc.).
  * @param {Object} params
- * @param {string} params.lineUserId LINE user ID
- * @param {string} params.text User's text message
- * @returns {Promise<{answer: string, conversation_id: string | null}>}
+ * @param {string} params.jobId
+ * @param {string} params.userId
+ * @param {string} params.lineUserId
+ * @param {string} params.imageUrl
+ * @param {string|null} [params.conversationId]
+ * @param {Record<string, any>} [params.extraJobData]
  */
-export async function handleTextMessageJob({ lineUserId, text }) {
+export async function handleImageJob({
+  jobId,
+  userId,
+  lineUserId,
+  imageUrl,
+  conversationId = null,
+  extraJobData = {},
+}) {
+  if (!imageUrl) {
+    throw new Error('imageUrl is required');
+  }
   if (!lineUserId) {
     throw new Error('lineUserId is required');
   }
-  if (!text || typeof text !== 'string') {
-    throw new Error('text is required');
-  }
-
-  // Get existing conversation ID from Firestore
-  const conversationId = await getConversationId(lineUserId);
 
   let difyResult;
   try {
-    difyResult = await handleTextMessage({ query: text, userId: lineUserId, conversationId });
+    difyResult = await analyzeImage({ imageUrl, userId, conversationId });
   } catch (error) {
-    console.error('Dify text message error:', error);
+    const fallback = buildFallbackAnswer('画像解析でエラーが発生しました。別の画像でお試しください。');
+    await updateJobDocument(jobId, {
+      status: 'error',
+      error_message: error.message,
+      conversation_id: conversationId,
+      last_message: fallback,
+      media_type: 'image',
+      ...extraJobData,
+    }, 'image_jobs');
     throw error;
   }
 
-  const { answer, conversation_id: newConversationId } = difyResult;
+  const { answer, meta, conversation_id: newConversationId } = difyResult;
   const effectiveConversationId = newConversationId ?? conversationId ?? null;
 
-  // Update conversation ID in Firestore
-  if (effectiveConversationId) {
-    await updateConversationId(lineUserId, effectiveConversationId);
+  let processedAnswer = answer;
+  if (!processedAnswer.includes('[English]') && !processedAnswer.includes('---\n[English]')) {
+    processedAnswer = `${processedAnswer}\n\n---\n[English]\n${processedAnswer}`;
   }
 
   let lineError;
   try {
-    await sendLineMessage(lineUserId, answer);
+    await sendLineMessage(lineUserId, processedAnswer);
   } catch (error) {
     lineError = error;
-    throw error;
+  }
+
+  const status = lineError ? 'line_failed' : 'completed';
+  const payload = {
+    status,
+    conversation_id: effectiveConversationId,
+    dify_meta: meta ?? {},
+    last_message: answer,
+    media_type: 'image',
+    ...extraJobData,
+  };
+  if (lineError) {
+    payload.line_error = lineError.message;
+  }
+
+  await updateJobDocument(jobId, payload, 'image_jobs');
+
+  if (lineError) {
+    throw lineError;
   }
 
   return {
     answer,
     conversation_id: effectiveConversationId,
+    meta,
   };
 }
 

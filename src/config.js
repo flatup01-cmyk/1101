@@ -49,6 +49,10 @@ export const SHEETS_CONFIG = {
   sheetId: import.meta.env.VITE_GOOGLE_SHEET_ID || '',
 }
 
+export const FUNCTION_ENDPOINTS = {
+  notifyVideoUploadUrl: import.meta.env.VITE_NOTIFY_VIDEO_UPLOAD_URL || '',
+}
+
 // 設定値の検証（開発環境のみ）
 if (import.meta.env.DEV) {
   console.log('環境変数読み込み状況:', {

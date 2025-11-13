@@ -70,6 +70,22 @@ function renderUI() {
 function createUploadView() {
   return `
     <div class="upload-container">
+      <section class="intro-card">
+        <h2 class="intro-title">自己紹介</h2>
+        <p class="intro-text">
+          私は格闘技のスペシャルAIです。私のデータには、有名格闘家1000人以上の知恵が詰まっています。技術的な相談や戦術は現役・往年の格闘家の知見をもとに具体的に支援します。さらに、歴史上の偉人や戦国武将の志・理念をコンテキストに取り入れ、精神面のサポートや目標設定もお手伝いします。
+        </p>
+      </section>
+
+      <section class="guide-card">
+        <h3 class="guide-title">UIの使い方</h3>
+        <ul class="guide-list">
+          <li>20秒以内・100MB以下の短尺動画でお試しください。喋り方や口調は変えずに丁寧にご案内します。</li>
+          <li>動画解析に加えて、画像認識にも対応しています。テキストを送ると内容に沿った返信が届きます。</li>
+          <li>操作は「動画を選ぶ」「解析を開始」からどうぞ。画像アップロードやテキスト送信も同じ画面でできます。</li>
+        </ul>
+      </section>
+
       <input type="file" id="video-input" accept="video/*" />
       <button id="upload-btn" class="giant-upload-btn">
         <div class="btn-icon">📹</div>

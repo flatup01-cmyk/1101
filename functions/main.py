@@ -109,7 +109,11 @@ PROJECT_ID = validate_gcp_project_id()
 
 
 # Dify API設定（環境変数から・必須）
-DIFY_API_ENDPOINT = os.environ.get('DIFY_API_ENDPOINT', 'https://api.dify.ai/v1/chat-messages')
+DIFY_API_ENDPOINT = (
+    os.environ.get('DIFY_API_URL')
+    or os.environ.get('DIFY_API_ENDPOINT')
+    or 'https://api.dify.ai/v1/chat-messages'
+)
 DIFY_API_KEY = os.environ.get('DIFY_API_KEY')
 
 # 環境変数の検証（警告のみ、関数の実行は継続）

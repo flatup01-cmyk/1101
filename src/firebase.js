@@ -55,20 +55,18 @@ if (import.meta.env.DEV) {
 
 /**
  * Creates a new video processing job document in Firestore.
- * @param {string} userId - The Firebase Anonymous Auth user ID.
- * @param {string} lineUserId - The LINE user ID (from LIFF).
+ * @param {string} userId - The user's ID.
  * @param {string} fileName - The name of the video file.
  * @returns {Promise<string>} - The unique ID of the created job.
  */
-async function createVideoJob(userId, lineUserId, fileName) {
+async function createVideoJob(userId, fileName) {
     try {
-        console.log(`📝 Creating job for user: ${userId}, lineUserId: ${lineUserId}, file: ${fileName}`);
+        console.log(`📝 Creating job for user: ${userId}, file: ${fileName}`);
         
         // タイムアウト付きでFirestoreジョブを作成（モバイル環境対応）
         const jobsCollection = collection(firestore, 'video_jobs');
         const createPromise = addDoc(jobsCollection, {
             userId: userId,
-            lineUserId: lineUserId, // LINEユーザーIDを保存
             originalFileName: fileName,
             status: 'pending', // pending -> processing -> completed / error
             createdAt: serverTimestamp(),
@@ -107,34 +105,40 @@ async function createVideoJob(userId, lineUserId, fileName) {
 /**
  * Uploads a video file to Firebase Storage, associated with a Firestore job.
  * @param {File} videoFile - The video file to upload.
- * @param {string} userId - The Firebase Anonymous Auth user ID.
- * @param {string} lineUserId - The LINE user ID (from LIFF).
+ * @param {string} userId - The user's ID.
  * @param {Function} progressCallback - Callback for upload progress updates.
  * @returns {Promise<void>}
  */
-export async function uploadVideoToStorage(videoFile, userId, lineUserId, progressCallback) {
-    if (!userId || !/^[a-zA-Z0-9_-]+$/.test(userId)) {
-        console.error('❌ Invalid userId:', userId);
-        throw new Error('不正なユーザーIDです。');
-    }
-    if (!lineUserId || !/^[a-zA-Z0-9_-]+$/.test(lineUserId)) {
-        console.error('❌ Invalid lineUserId:', lineUserId);
-        throw new Error('不正なLINEユーザーIDです。');
+export async function uploadVideoToStorage(videoFile, userId, progressCallback) {
+    const normalizedUserId = typeof userId === 'string' ? userId.trim() : '';
+
+    if (!normalizedUserId) {
+        console.error('❌ Invalid userId: value is missing or not a string', userId);
+        throw new Error('ユーザー情報の取得に失敗しました。LINEアプリでログインし直してください。');
     }
 
-    console.log(`📤 Upload request - User: ${userId}, LineUser: ${lineUserId}, File: ${videoFile.name}, Size: ${(videoFile.size / 1024 / 1024).toFixed(2)}MB`);
+    // Cloud Storage のパスとして安全な形式に揃える
+    const sanitizedUserId = normalizedUserId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    if (sanitizedUserId !== normalizedUserId) {
+        console.warn('⚠️ User ID was sanitized for storage path:', {
+            original: normalizedUserId,
+            sanitized: sanitizedUserId,
+        });
+    }
+
+    console.log(`📤 Upload request - User: ${normalizedUserId}, File: ${videoFile.name}, Size: ${(videoFile.size / 1024 / 1024).toFixed(2)}MB`);
 
     // 1. Create a job document in Firestore first.
     let jobId;
     try {
-        jobId = await createVideoJob(userId, lineUserId, videoFile.name);
+        jobId = await createVideoJob(normalizedUserId, videoFile.name);
     } catch (error) {
         console.error('❌ Job creation failed:', error);
         throw error; // エラーをそのまま伝播
     }
 
     // 2. Define the storage path using the job ID for integrity.
-    const storagePath = `videos/${userId}/${jobId}/${videoFile.name}`;
+    const storagePath = `videos/${sanitizedUserId}/${jobId}/${videoFile.name}`;
     const storageRef = ref(storage, storagePath);
 
     console.log(`🚀 Starting upload for job ${jobId} to ${storagePath}`);

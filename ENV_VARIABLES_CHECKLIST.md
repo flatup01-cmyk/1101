@@ -38,6 +38,11 @@ VITE_GCS_BUCKET_NAME=aikaapp-584fa.appspot.com
 VITE_GOOGLE_SHEET_ID=1UOw5RYqZAR1_Cu5kqIm6Kg3vArwfBKFEs68pnO9nWS8
 ```
 
+### Cloud Functions設定
+```
+VITE_NOTIFY_VIDEO_UPLOAD_URL=https://asia-northeast1-aikaapp-584fa.cloudfunctions.net/notifyVideoUpload
+```
+
 ## 設定方法
 
 1. Netlifyダッシュボード → 「Environment variables」

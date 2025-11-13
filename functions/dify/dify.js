@@ -1,5 +1,3 @@
-<<<<<<< Current (Your changes)
-=======
 import fetch from 'node-fetch';
 import { buildFallbackAnswer, normalizeUsage, requireEnv } from './util.js';
 
@@ -14,17 +12,12 @@ export async function analyzeVideoBlocking({ videoUrl, userId, conversationId })
   }
 
   const apiKey = requireEnv('DIFY_API_KEY');
+  const apiUrl = requireEnv('DIFY_API_URL', {
+    defaultValue: 'https://api.dify.ai/v1/chat-messages',
+  });
 
   const requestBody = {
-<<<<<<< Current (Your changes)
-<<<<<<< Current (Your changes)
     query: 'この動画を解析し、要約と重要イベントを日本語で返してください。解析結果の最後に、英語でサマリーも追加してください。\n\nPlease analyze this video and return a summary and important events in Japanese. Also add an English summary at the end of the analysis results.',
-=======
-    query: 'この動画を解析し、要約と重要イベントを日本語で返してください。その後、同じ内容を英語でも返してください。\n\n形式:\n[日本語の解析結果]\n\n[English translation of the analysis]',
->>>>>>> Incoming (Background Agent changes)
-=======
-    query: 'この動画を解析し、要約と重要イベントを日本語と英語の両方で返してください。まず日本語で説明し、その後に英語で説明してください。\n\nAnalyze this video and return a summary and important events in both Japanese and English. First explain in Japanese, then explain in English.',
->>>>>>> Incoming (Background Agent changes)
     inputs: { source: 'line' },
     response_mode: 'blocking',
     user: userId,
@@ -35,14 +28,14 @@ export async function analyzeVideoBlocking({ videoUrl, userId, conversationId })
 
   // Dify APIリクエストの詳細をログ出力（デバッグ用）
   console.info('Dify APIリクエスト:', JSON.stringify({
-    url: 'https://api.dify.ai/v1/chat-messages',
+    url: apiUrl,
     method: 'POST',
     videoUrl: videoUrl,
     userId: userId,
     conversationId: conversationId ?? null,
   }));
 
-  const res = await fetch('https://api.dify.ai/v1/chat-messages', {
+  const res = await fetch(apiUrl, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -151,6 +144,9 @@ export async function chatWithDify({ message, userId, conversationId }) {
   }
 
   const apiKey = requireEnv('DIFY_API_KEY');
+  const apiUrl = requireEnv('DIFY_API_URL', {
+    defaultValue: 'https://api.dify.ai/v1/chat-messages',
+  });
 
   const requestBody = {
     query: message,
@@ -162,14 +158,14 @@ export async function chatWithDify({ message, userId, conversationId }) {
   };
 
   console.info('Dify Chat APIリクエスト:', JSON.stringify({
-    url: 'https://api.dify.ai/v1/chat-messages',
+    url: apiUrl,
     method: 'POST',
     message: message.substring(0, 100),
     userId: userId,
     conversationId: conversationId ?? null,
   }));
 
-  const res = await fetch('https://api.dify.ai/v1/chat-messages', {
+  const res = await fetch(apiUrl, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -223,9 +219,8 @@ export async function chatWithDify({ message, userId, conversationId }) {
   return { answer, meta, conversation_id: convId };
 }
 
-
 /**
- * Call Dify for image-based analysis (fight card prediction, etc.).
+ * Call Dify API for image analysis.
  * @param {{imageUrl: string, userId: string, conversationId?: string | null}} params
  * @returns {Promise<{answer: string, meta: Record<string, any>, conversation_id: string | null}>}
  */
@@ -235,13 +230,13 @@ export async function analyzeImage({ imageUrl, userId, conversationId }) {
   }
 
   const apiKey = requireEnv('DIFY_API_KEY');
+  const apiUrl = requireEnv('DIFY_API_URL', {
+    defaultValue: 'https://api.dify.ai/v1/chat-messages',
+  });
 
   const requestBody = {
-    query: '添付した格闘技の試合カード画像を解析し、(1)カードの概要、(2)注目ポイント、(3)予想勝者と勝因、(4)警戒すべきリスク、(5)Flatupジムでできる準備メニュー、を日本語で詳しくまとめ、最後に---\\n[English]\\nの形で同内容を英語でも記載してください。',
-    inputs: {
-      source: 'line',
-      task: 'fight_card_prediction',
-    },
+    query: 'この画像を解析し、日本語で結果を返してください。最後に英語サマリーも追加してください。\n\nPlease analyze this image and return the findings in Japanese, then append an English summary.',
+    inputs: { source: 'line' },
     response_mode: 'blocking',
     user: userId,
     conversation_id: conversationId ?? '',
@@ -250,14 +245,14 @@ export async function analyzeImage({ imageUrl, userId, conversationId }) {
   };
 
   console.info('Dify Image APIリクエスト:', JSON.stringify({
-    url: 'https://api.dify.ai/v1/chat-messages',
+    url: apiUrl,
     method: 'POST',
-    imageUrl,
-    userId,
+    imageUrl: imageUrl,
+    userId: userId,
     conversationId: conversationId ?? null,
   }));
 
-  const res = await fetch('https://api.dify.ai/v1/chat-messages', {
+  const res = await fetch(apiUrl, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -269,70 +264,6 @@ export async function analyzeImage({ imageUrl, userId, conversationId }) {
   if (!res.ok) {
     const errorBody = await res.text();
     let errorMessage = `Dify image error ${res.status} ${res.statusText}`;
-    try {
-      const parsed = JSON.parse(errorBody);
-      errorMessage += `: ${JSON.stringify(parsed)}`;
-    } catch {
-      errorMessage += `: ${errorBody}`;
-    }
-    console.error('Dify Image APIエラー:', errorMessage);
-    throw new Error(errorMessage);
-  }
-
-  const json = await res.json();
-  const baseMeta = json.metadata ?? {};
-  const usage = baseMeta.usage ? normalizeUsage(baseMeta.usage) : undefined;
-  const meta = usage ? { ...baseMeta, usage } : baseMeta;
-
-  const answer = typeof json.answer === 'string' && json.answer.trim().length
-    ? json.answer.trim()
-    : buildFallbackAnswer('画像解析の結果が取得できませんでした。別の画像でお試しください。');
-
-  const convId = json.conversation_id ?? conversationId ?? null;
-
-  return { answer, meta, conversation_id: convId };
-}
-
-/**
- * Call Dify for text message conversation.
- * @param {{query: string, userId: string, conversationId?: string | null}} params
- * @returns {Promise<{answer: string, meta: Record<string, any>, conversation_id: string | null}>}
- */
-export async function handleTextMessage({ query, userId, conversationId }) {
-  if (!query) {
-    throw new Error('query is required for handleTextMessage');
-  }
-
-  const apiKey = requireEnv('DIFY_API_KEY');
-
-  const requestBody = {
-    query: query,
-    inputs: { source: 'line' },
-    response_mode: 'blocking',
-    user: userId,
-    conversation_id: conversationId ?? '',
-  };
-
-  console.info('Dify API text message request:', JSON.stringify({
-    url: 'https://api.dify.ai/v1/chat-messages',
-    method: 'POST',
-    query: query.substring(0, 100),
-    userId: userId,
-    conversationId: conversationId ?? null,
-  }));
-
-  const res = await fetch('https://api.dify.ai/v1/chat-messages', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(requestBody),
-  });
-
-  if (!res.ok) {
-    const errorBody = await res.text();
-    let errorMessage = `Dify text message error ${res.status} ${res.statusText}`;
     let errorJson = null;
     try {
       errorJson = JSON.parse(errorBody);
@@ -340,23 +271,37 @@ export async function handleTextMessage({ query, userId, conversationId }) {
     } catch {
       errorMessage += `: ${errorBody}`;
     }
-    
-    console.error('Dify API text message error:', JSON.stringify({
+
+    console.error('Dify Image APIエラー詳細:', JSON.stringify({
       status: res.status,
       statusText: res.statusText,
-      errorBody: errorBody,
+      errorBody: errorBody.substring(0, 500),
       errorJson: errorJson,
+      imageUrl: imageUrl.substring(0, 100) + '...',
+      requestHeaders: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ***',
+      },
     }));
-    
+
     if (res.status === 500) {
-      console.error(`Dify API 500エラー: ${errorMessage}`);
+      console.error(`Dify Image API 500エラー: ${errorMessage}`);
       return {
-        answer: '申し訳ございません。一時的なエラーが発生しました。しばらく待ってから再度お試しください。',
+        answer: buildFallbackAnswer('画像解析が混雑しています。しばらくしてから再度お試しください。'),
         meta: {},
         conversation_id: conversationId ?? null,
       };
     }
-    
+
+    if (res.status === 400) {
+      console.error(`Dify Image API 400エラー: ${errorMessage}`);
+      return {
+        answer: buildFallbackAnswer('画像解析でエラーが発生しました。画像を確認して再度お試しください。'),
+        meta: {},
+        conversation_id: conversationId ?? null,
+      };
+    }
+
     throw new Error(errorMessage);
   }
 
@@ -365,77 +310,26 @@ export async function handleTextMessage({ query, userId, conversationId }) {
   const usage = baseMeta.usage ? normalizeUsage(baseMeta.usage) : undefined;
   const meta = usage ? { ...baseMeta, usage } : baseMeta;
 
-  const answer = typeof json.answer === 'string' && json.answer.trim().length
-    ? json.answer.trim()
-    : '申し訳ございません。現在応答を生成できませんでした。';
+  let answer = '';
+  if (Array.isArray(json.answer)) {
+    answer = json.answer
+      .map((item) => (typeof item === 'string' ? item : JSON.stringify(item)))
+      .join('\n');
+  } else if (typeof json.answer === 'string') {
+    answer = json.answer.trim();
+  } else if (json.text && typeof json.text === 'string') {
+    answer = json.text.trim();
+  } else {
+    console.warn('Dify Image APIレスポンスにanswer/textフィールドが見つかりません:', JSON.stringify(json).substring(0, 200));
+    answer = buildFallbackAnswer('現在詳細取得に時間がかかっています');
+  }
+
+  if (!answer || answer.length === 0) {
+    answer = buildFallbackAnswer('現在詳細取得に時間がかかっています');
+  }
 
   const convId = json.conversation_id ?? conversationId ?? null;
-
   return { answer, meta, conversation_id: convId };
 }
 
-/**
- * Add English translation to Japanese text using Dify API.
- * @param {string} japaneseText
- * @returns {Promise<string>}
- */
-export async function addEnglishTranslation(japaneseText) {
-  if (!japaneseText || typeof japaneseText !== 'string') {
-    return japaneseText;
-  }
 
-  try {
-    const apiKey = requireEnv('DIFY_API_KEY');
-    
-    // Simple translation request - you may need to adjust this based on your Dify setup
-    const requestBody = {
-      query: `以下の日本語を英語に翻訳してください。翻訳のみを返してください:\n\n${japaneseText}`,
-      inputs: { source: 'line' },
-      response_mode: 'blocking',
-      user: 'translation_bot',
-    };
-
-    // Create AbortController for timeout
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒タイムアウト
-
-    let res;
-    try {
-      res = await fetch('https://api.dify.ai/v1/chat-messages', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-    } catch (error) {
-      clearTimeout(timeoutId);
-      if (error.name === 'AbortError') {
-        throw new Error('Translation request timeout');
-      }
-      throw error;
-    }
-
-    if (res.ok) {
-      const json = await res.json();
-      const englishText = typeof json.answer === 'string' && json.answer.trim().length
-        ? json.answer.trim()
-        : null;
-      
-      if (englishText) {
-        return `${japaneseText}\n\n${englishText}`;
-      }
-    }
-  } catch (error) {
-    console.error('English translation error:', error);
-    // 翻訳エラーが発生しても、元の日本語テキストを返す
-  }
-
-  return japaneseText;
-}
-
-
->>>>>>> Incoming (Background Agent changes)

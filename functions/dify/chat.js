@@ -1,70 +1,104 @@
+// functions/dify/chat.js
+// Dify APIを使用したテキスト会話処理
+
 import fetch from 'node-fetch';
+import admin from 'firebase-admin';
 import { requireEnv } from './util.js';
 
+if (!admin.apps.length) {
+  admin.initializeApp();
+}
+
+const firestore = admin.firestore();
+
 /**
- * Call Dify API for text conversation (chat).
- * @param {{query: string, userId: string, conversationId?: string | null}} params
- * @returns {Promise<{answer: string, conversation_id: string | null}>}
+ * Dify APIを使用してテキストメッセージを処理し、AIKA19号の返信を生成
+ * 
+ * @param {Object} params
+ * @param {string} params.userId LINE user ID
+ * @param {string} params.userMessage ユーザーのメッセージ
+ * @param {string|null} [params.conversationId] 既存の会話ID（会話の継続用）
+ * @param {string} [params.userGender] ユーザーの性別（男性/女性/unknown）
+ * @returns {Promise<Object>} { answer: string, conversation_id: string }
  */
-export async function chatWithDify({ query, userId, conversationId }) {
-  if (!query) {
-    throw new Error('query is required for chatWithDify');
+export async function handleTextChat({
+  userId,
+  userMessage,
+  conversationId = null,
+  userGender = 'unknown',
+}) {
+  if (!userId || !userMessage) {
+    throw new Error('userId and userMessage are required');
   }
 
-  const apiKey = requireEnv('DIFY_API_KEY');
+  const difyApiKey = requireEnv('DIFY_API_KEY');
+  const difyApiUrl = requireEnv('DIFY_API_URL', {
+    defaultValue: 'https://api.dify.ai/v1/chat-messages',
+  });
+  const userConversationsRef = firestore.collection('user_conversations').doc(userId);
 
-  const requestBody = {
-    query: query,
-    inputs: { source: 'line' },
-    response_mode: 'blocking',
-    user: userId,
-    conversation_id: conversationId ?? '',
-  };
+  // Firestoreから会話IDとユーザー情報を取得（会話の継続性を保つため）
+  const userConversationsDoc = await userConversationsRef.get();
+  let effectiveConversationId = conversationId;
+  let effectiveUserGender = userGender;
 
-  console.info('Dify Chat APIリクエスト:', JSON.stringify({
-    url: 'https://api.dify.ai/v1/chat-messages',
-    method: 'POST',
-    query: query.substring(0, 100),
-    userId: userId,
-    conversationId: conversationId ?? null,
-  }));
+  if (userConversationsDoc.exists) {
+    const data = userConversationsDoc.data();
+    if (!effectiveConversationId) {
+      effectiveConversationId = data.conversationId || null;
+    }
+    if (effectiveUserGender === 'unknown') {
+      effectiveUserGender = data.gender || 'unknown';
+    }
+  }
 
-  const res = await fetch('https://api.dify.ai/v1/chat-messages', {
+  // ユーザープロファイルから性別を取得（存在する場合）
+  const userProfileRef = firestore.collection('user_profiles').doc(userId);
+  const userProfileDoc = await userProfileRef.get();
+  if (userProfileDoc.exists && effectiveUserGender === 'unknown') {
+    effectiveUserGender = userProfileDoc.data().gender || 'unknown';
+  }
+
+  // Dify APIのチャットメッセージエンドポイントを呼び出し
+  const difyResponse = await fetch(difyApiUrl, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      'Authorization': `Bearer ${difyApiKey}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(requestBody),
+    body: JSON.stringify({
+      query: userMessage,
+      user: userId,
+      response_mode: 'blocking',
+      conversation_id: effectiveConversationId, // 会話IDを使用（空の場合は新規会話）
+      inputs: {
+        user_gender: effectiveUserGender, // 性別情報を追加（男性/女性/unknown）
+      },
+    }),
   });
 
-  if (!res.ok) {
-    const errorBody = await res.text();
-    let errorMessage = `Dify chat error ${res.status} ${res.statusText}`;
-    try {
-      const errorJson = JSON.parse(errorBody);
-      errorMessage += `: ${JSON.stringify(errorJson)}`;
-    } catch {
-      errorMessage += `: ${errorBody}`;
-    }
-    
-    console.error('Dify Chat APIエラー詳細:', JSON.stringify({
-      status: res.status,
-      statusText: res.statusText,
-      errorBody: errorBody,
-      query: query.substring(0, 100),
-    }));
-    
-    throw new Error(errorMessage);
+  if (!difyResponse.ok) {
+    const errorText = await difyResponse.text();
+    throw new Error(`Dify API error ${difyResponse.status}: ${errorText}`);
   }
 
-  const json = await res.json();
-  const answer = typeof json.answer === 'string' && json.answer.trim().length
-    ? json.answer.trim()
-    : 'すみません、もう一度お願いします。';
+  const difyResult = await difyResponse.json();
+  const answer = difyResult.answer || difyResult.text || '...別に、何か用？';
+  const newConversationId = difyResult.conversation_id || effectiveConversationId;
 
-  const convId = json.conversation_id ?? conversationId ?? null;
+  // Firestoreに会話IDを保存（会話の継続性を保つため）
+  if (newConversationId) {
+    await userConversationsRef.set({
+      conversationId: newConversationId,
+      gender: effectiveUserGender,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+  }
 
-  return { answer, conversation_id: convId };
+  return {
+    answer,
+    conversation_id: newConversationId,
+    meta: difyResult.meta || {},
+  };
 }
 
