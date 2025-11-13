@@ -6,7 +6,10 @@ export function requireEnv(key, { allowEmpty = false, defaultValue = undefined }
     }
     throw new Error(`Missing required environment variable: ${key}`);
   }
-  return value;
+  if (typeof value !== 'string') {
+    return value;
+  }
+  return value.trim();
 }
 
 export function buildFallbackAnswer(japaneseMessage, englishMessage) {
