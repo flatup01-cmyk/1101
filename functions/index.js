@@ -19,11 +19,21 @@ const LINE_VERIFY_REPLY_TOKEN = '00000000000000000000000000000000';
 // ================================================================
 export const lineWebhookRouter = onRequest(
   {
-    secrets: ["MAKE_WEBHOOK_URL", "LINE_CHANNEL_ACCESS_TOKEN", "PROCESS_VIDEO_JOB_URL", "DIFY_API_KEY"],
+    secrets: ["MAKE_WEBHOOK_URL", "LINE_CHANNEL_ACCESS_TOKEN", "DIFY_API_KEY"],
     serviceAccount: '639286700347-compute@developer.gserviceaccount.com',
     timeoutSeconds: 300,
   },
   async (req, res) => {
+    if (!process.env.DIFY_API_KEY) {
+      console.error("重大なエラー: 環境変数 DIFY_API_KEY が設定されていません。");
+      res.status(500).send("サーバー設定エラーです。");
+      return;
+    }
+    if (!process.env.PROCESS_VIDEO_JOB_URL) {
+      console.error("重大なエラー: 環境変数 PROCESS_VIDEO_JOB_URL が設定されていません。");
+      res.status(500).send("サーバー設定エラーです。");
+      return;
+    }
     try {
       const events = req.body.events;
       if (!events || events.length === 0 || events[0].replyToken === LINE_VERIFY_REPLY_TOKEN) {
