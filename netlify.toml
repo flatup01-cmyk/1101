@@ -5,15 +5,12 @@
 [build.environment]
   NODE_VERSION = "20"
   NPM_VERSION = "10"
-<<<<<<< Current (Your changes)
 
 # SPA用のリダイレクト設定（すべてのパスをindex.htmlに）
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
-=======
->>>>>>> Incoming (Background Agent changes)
 
 # ビルドプラグイン（必要に応じて）
 # [[plugins]]
