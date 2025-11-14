@@ -1,5 +1,5 @@
 import fetch from 'node-fetch';
-import { buildFallbackAnswer, normalizeUsage, requireEnv } from './util.js';
+import { buildFallbackAnswer, normalizeUsage, requireEnv, sanitizeApiKey } from './util.js';
 
 /**
  * Call Dify in blocking mode for shorter videos.
@@ -12,6 +12,7 @@ export async function analyzeVideoBlocking({ videoUrl, userId, conversationId })
   }
 
   const apiKey = requireEnv('DIFY_API_KEY');
+  const safeApiKey = sanitizeApiKey(apiKey);
   const apiUrl = requireEnv('DIFY_API_URL', {
     defaultValue: 'https://api.dify.ai/v1/chat-messages',
   });
@@ -35,12 +36,16 @@ export async function analyzeVideoBlocking({ videoUrl, userId, conversationId })
     conversationId: conversationId ?? null,
   }));
 
+  // ヘッダーを厳密にASCIIのみで構成（ERR_INVALID_CHARエラー対策）
+  const headers = {
+    'Authorization': `Bearer ${safeApiKey}`,
+    'Content-Type': 'application/json',
+    'User-Agent': 'process-video-job/1.0',
+  };
+
   const res = await fetch(apiUrl, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
+    headers: headers,
     body: JSON.stringify(requestBody),
   });
 
@@ -144,6 +149,7 @@ export async function chatWithDify({ message, userId, conversationId }) {
   }
 
   const apiKey = requireEnv('DIFY_API_KEY');
+  const safeApiKey = sanitizeApiKey(apiKey);
   const apiUrl = requireEnv('DIFY_API_URL', {
     defaultValue: 'https://api.dify.ai/v1/chat-messages',
   });
@@ -165,12 +171,16 @@ export async function chatWithDify({ message, userId, conversationId }) {
     conversationId: conversationId ?? null,
   }));
 
+  // ヘッダーを厳密にASCIIのみで構成（ERR_INVALID_CHARエラー対策）
+  const headers = {
+    'Authorization': `Bearer ${safeApiKey}`,
+    'Content-Type': 'application/json',
+    'User-Agent': 'line-webhook-router/1.0',
+  };
+
   const res = await fetch(apiUrl, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
+    headers: headers,
     body: JSON.stringify(requestBody),
   });
 
@@ -230,6 +240,7 @@ export async function analyzeImage({ imageUrl, userId, conversationId }) {
   }
 
   const apiKey = requireEnv('DIFY_API_KEY');
+  const safeApiKey = sanitizeApiKey(apiKey);
   const apiUrl = requireEnv('DIFY_API_URL', {
     defaultValue: 'https://api.dify.ai/v1/chat-messages',
   });
@@ -252,12 +263,16 @@ export async function analyzeImage({ imageUrl, userId, conversationId }) {
     conversationId: conversationId ?? null,
   }));
 
+  // ヘッダーを厳密にASCIIのみで構成（ERR_INVALID_CHARエラー対策）
+  const headers = {
+    'Authorization': `Bearer ${safeApiKey}`,
+    'Content-Type': 'application/json',
+    'User-Agent': 'line-webhook-router/1.0',
+  };
+
   const res = await fetch(apiUrl, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
+    headers: headers,
     body: JSON.stringify(requestBody),
   });
 

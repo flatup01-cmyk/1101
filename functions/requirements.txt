@@ -16,6 +16,7 @@ google-cloud-firestore==2.18.0
 
 # HTTPリクエスト（Dify API、LINE API用）
 requests==2.31.0
+urllib3>=2.0.0  # latin-1エンコーディングエラー対策のため明示的に追加
 tenacity==8.5.0
 
 # Secret Manager（セキュリティ強化）

@@ -16,6 +16,7 @@ import json
 import tempfile
 import base64
 import requests
+import urllib3
 import logging
 import hashlib
 import traceback
@@ -171,13 +172,13 @@ def call_dify_via_mcp(scores, user_id):
             logger.error("❌ DIFY_API_KEYがASCII文字列に変換できませんでした")
             return None
         
-        # ヘッダーを構築（すべてASCII文字列）
+        # ヘッダーを構築（すべてASCII文字列、latin-1エンコーディングエラー対策）
         auth_header_value = f'Bearer {api_key_ascii}'
         headers = {
             'Authorization': auth_header_value,
             'Accept': 'application/json',
             'Content-Type': 'application/json',
-            'User-Agent': 'AIKA-Video-Analyzer/1.0'
+            'User-Agent': 'process-video-trigger/1.0'  # ASCIIのみ
         }
         
         # すべてのヘッダー値をASCII文字列として確認（二重チェック）
@@ -242,34 +243,65 @@ def call_dify_via_mcp(scores, user_id):
                     api_url = f"{api_url}{separator}app_id={DIFY_APP_ID}"
                     logger.info(f"📤 Dify API URL (app_id付き): {api_url}")
                 
-                # requests.Sessionを使用して、ヘッダーのエンコーディング問題を回避
-                session = requests.Session()
-                
-                # PreparedRequestを使用してヘッダーを事前に処理
-                req = requests.Request(
-                    'POST',
-                    api_url,
-                    headers=safe_headers,
-                    json=payload
-                )
-                prepared = session.prepare_request(req)
-                
-                # ヘッダーを再度確認（PreparedRequestが処理した後）
-                for header_name, header_value in prepared.headers.items():
-                    # 各ヘッダー値をASCII文字列として確認
-                    if isinstance(header_value, str):
-                        try:
-                            # latin-1でエンコード可能か確認
-                            header_value.encode('latin-1')
-                        except UnicodeEncodeError:
-                            # エンコードできない場合は、ASCII文字のみを保持
-                            safe_value = header_value.encode('ascii', 'ignore').decode('ascii')
-                            prepared.headers[header_name] = safe_value
-                            logger.warning(f"⚠️ ヘッダー '{header_name}' の値をASCII文字列に変換しました")
-                
-                # セッションでリクエストを送信
+                # urllib3を直接使用して、latin-1エンコーディングエラーを完全に回避
                 logger.info(f"📤 Dify API呼び出し開始 (試行 {attempt}/{max_attempts})")
-                response = session.send(prepared, timeout=30)
+                
+                # urllib3のHTTPConnectionPoolを使用
+                http = urllib3.PoolManager()
+                
+                # ヘッダーを確実にASCII文字列に変換（urllib3用）
+                urllib3_headers = {}
+                for k, v in safe_headers.items():
+                    # ヘッダーキーと値を確実にASCII文字列に変換
+                    safe_key = str(k).encode('ascii', 'ignore').decode('ascii')
+                    safe_value = str(v).encode('ascii', 'ignore').decode('ascii')
+                    # latin-1でエンコード可能か最終確認
+                    try:
+                        safe_key.encode('latin-1')
+                        safe_value.encode('latin-1')
+                        urllib3_headers[safe_key] = safe_value
+                    except UnicodeEncodeError:
+                        # エンコードできない場合は、ASCII文字のみを保持
+                        urllib3_headers[safe_key.encode('ascii', 'ignore').decode('ascii')] = safe_value.encode('ascii', 'ignore').decode('ascii')
+                        logger.warning(f"⚠️ ヘッダー '{safe_key}' の値をASCII文字列に変換しました")
+                
+                # JSONペイロードをエンコード
+                json_body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+                
+                # urllib3でリクエストを送信
+                try:
+                    urllib3_response = http.request(
+                        'POST',
+                        api_url,
+                        headers=urllib3_headers,
+                        body=json_body,
+                        timeout=urllib3.Timeout(connect=10, read=30)
+                    )
+                    
+                    # urllib3のレスポンスをrequests.Response風のオブジェクトに変換
+                    class Urllib3Response:
+                        def __init__(self, urllib3_resp):
+                            self.status_code = urllib3_resp.status
+                            self.headers = urllib3_resp.headers
+                            self.text = urllib3_resp.data.decode('utf-8')
+                            self.content = urllib3_resp.data
+                        
+                        def json(self):
+                            return json.loads(self.text)
+                        
+                        def raise_for_status(self):
+                            if self.status_code >= 400:
+                                raise requests.exceptions.HTTPError(f"HTTP {self.status_code}: {self.text[:200]}")
+                    
+                    response = Urllib3Response(urllib3_response)
+                except Exception as urllib3_error:
+                    # urllib3でエラーが発生した場合、requestsにフォールバック
+                    logger.warning(f"⚠️ urllib3でエラーが発生、requestsにフォールバック: {str(urllib3_error)}")
+                    # requests.Sessionを使用（最後の手段）
+                    session = requests.Session()
+                    req = requests.Request('POST', api_url, headers=urllib3_headers, json=payload)
+                    prepared = session.prepare_request(req)
+                    response = session.send(prepared, timeout=30)
                 
                 # 503/429エラーの場合はリトライ（指数バックオフ）
                 if response.status_code in (503, 429):
@@ -573,14 +605,26 @@ def process_video(data, context):
             return {"status": "error", "reason": "invalid path"}
         
         # ファイルパスからユーザーIDとjobIdを抽出
-        # パス構造: videos/{userId}/{jobId}/{fileName}
+        # パス構造（2パターン対応）:
+        # 1. videos/{userId}/{messageId}.mp4 (リッチメニューからの動画)
+        # 2. videos/{userId}/{jobId}/{fileName} (LIFFアプリからの動画)
         path_parts = file_path.split('/')
-        if len(path_parts) < 4:
+        if len(path_parts) < 3:
             logger.error(f"❌ セキュリティ: パス構造が不正: {file_path}")
             return {"status": "error", "reason": "invalid path structure"}
         
         user_id = path_parts[1]
-        job_id = path_parts[2] if len(path_parts) >= 3 else None
+        # パスが3要素（videos/{userId}/{filename}）の場合は、messageIdをjobIdとして使用
+        # パスが4要素以上（videos/{userId}/{jobId}/{filename}）の場合は、jobIdを抽出
+        if len(path_parts) == 3:
+            # リッチメニューからの動画: videos/{userId}/{messageId}.mp4
+            filename = path_parts[2]
+            # 拡張子を除いた部分をjobIdとして使用
+            job_id = filename.rsplit('.', 1)[0] if '.' in filename else filename
+            logger.info(f"📁 リッチメニュー形式のパスを検出: jobId={job_id}")
+        else:
+            # LIFFアプリからの動画: videos/{userId}/{jobId}/{filename}
+            job_id = path_parts[2] if len(path_parts) >= 3 else None
         
         logger.info(f"📁 ユーザーID抽出: {user_id}, JobID抽出: {job_id}")
         

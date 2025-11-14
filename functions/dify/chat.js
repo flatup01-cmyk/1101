@@ -3,7 +3,7 @@
 
 import fetch from 'node-fetch';
 import admin from 'firebase-admin';
-import { requireEnv } from './util.js';
+import { requireEnv, sanitizeApiKey } from './util.js';
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -32,6 +32,7 @@ export async function handleTextChat({
   }
 
   const difyApiKey = requireEnv('DIFY_API_KEY');
+  const safeApiKey = sanitizeApiKey(difyApiKey);
   const difyApiUrl = requireEnv('DIFY_API_URL', {
     defaultValue: 'https://api.dify.ai/v1/chat-messages',
   });
@@ -59,13 +60,17 @@ export async function handleTextChat({
     effectiveUserGender = userProfileDoc.data().gender || 'unknown';
   }
 
+  // ヘッダーを厳密にASCIIのみで構成（ERR_INVALID_CHARエラー対策）
+  const headers = {
+    'Authorization': `Bearer ${safeApiKey}`,
+    'Content-Type': 'application/json',
+    'User-Agent': 'line-webhook-router/1.0',
+  };
+
   // Dify APIのチャットメッセージエンドポイントを呼び出し
   const difyResponse = await fetch(difyApiUrl, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${difyApiKey}`,
-      'Content-Type': 'application/json',
-    },
+    headers: headers,
     body: JSON.stringify({
       query: userMessage,
       user: userId,
