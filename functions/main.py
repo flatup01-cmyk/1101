@@ -1212,8 +1212,3 @@ def process_video_trigger(cloud_event):
 # functions_frameworkが自動的にCloudEventハンドラーをWSGIアプリに変換
 # Cloud Runは自動的にCloudEventをHTTPリクエストに変換するため、
 # functions_frameworkの内部WSGIアプリケーションを使用
-try:
-    # functions_frameworkが提供するWSGIアプリケーションを取得
-    from functions_framework import create_app
-    app = create_app(process_video_trigger, target_type='cloud_event')
-except (ImportError, AttributeError):
