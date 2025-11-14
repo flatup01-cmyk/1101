@@ -8,7 +8,6 @@ import { handleVideoJob } from './dify/handler.js';
 import { chatWithDify } from './dify/dify.js';
 import { Client } from '@line/bot-sdk'; // 正しいインポート方式
 import crypto from 'crypto';
-import crypto from 'crypto';
 
 // Functionsの全体設定
 setGlobalOptions({region: "asia-northeast1"});
@@ -48,25 +47,25 @@ async function callDifyBlocking(payload, { maxAttempts = 3, timeoutMs = 15000 } 
       });
 
       clearTimeout(timer);
-      const text = await res.text();
+      const textBody = await res.text();
 
       if (res.ok) {
         try {
-          const json = JSON.parse(text);
+          const json = JSON.parse(textBody);
           return { ok: true, data: json };
         } catch {
-          return { ok: true, data: { answer: text } };
+          return { ok: true, data: { answer: textBody } };
         }
       }
 
       const retriable =
         res.status === 429 ||
         res.status === 503 ||
-        /503\s+UNAVAILABLE/i.test(text) ||
-        /model is overloaded/i.test(text);
+        /503\s+UNAVAILABLE/i.test(textBody) ||
+        /model is overloaded/i.test(textBody);
 
       if (!retriable || attempt === maxAttempts) {
-        return { ok: false, error: `Dify error ${res.status}: ${text}` };
+        return { ok: false, error: `Dify error ${res.status}: ${textBody}` };
       }
 
       await sleep(backoff);
@@ -118,8 +117,8 @@ function buildImageAnalysisMessage(analysis) {
   const metrics = analysis?.metrics || {};
   const lines = [
     '画像解析の簡易結果です。',
-    `・ファイルサイズ: 約 ${metrics.file_size_kb ?? '-'} KB`,
-    `・コンテンツハッシュ（短縮）: ${metrics.content_hash ?? '-'}`,
+    `・ファイルサイズ: 約 ${metrics.file_size_kb ?? '-' } KB`,
+    `・コンテンツハッシュ（短縮）: ${metrics.content_hash ?? '-' }`,
   ];
   return lines.join('\n');
 }
@@ -163,298 +162,7 @@ async function replyOrPushMessage(lineClient, replyToken, userId, messages) {
     console.warn('pushMessage skipped: userId is missing');
   }
 }
-const DIFY_BASE_URL = (process.env.DIFY_BASE_URL || 'https://api.dify.ai').replace(/\/$/, '');
-const DIFY_APP_ID = process.env.DIFY_APP_ID || null;
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function callDifyBlocking(payload, { maxAttempts = 3, timeoutMs = 15000 } = {}) {
-  const apiKey = process.env.DIFY_API_KEY;
-  if (!apiKey) {
-    return { ok: false, error: 'Missing DIFY_API_KEY' };
-  }
-
-  const appQuery = DIFY_APP_ID ? `?app_id=${encodeURIComponent(DIFY_APP_ID)}` : '';
-  const url = `${DIFY_BASE_URL}/v1/chat-messages${appQuery}`;
-  let backoff = 1000;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timer);
-      const text = await res.text();
-
-      if (res.ok) {
-        try {
-          const json = JSON.parse(text);
-          return { ok: true, data: json };
-        } catch {
-          return { ok: true, data: { answer: text } };
-        }
-      }
-
-      const retriable =
-        res.status === 429 ||
-        res.status === 503 ||
-        /503\s+UNAVAILABLE/i.test(text) ||
-        /model is overloaded/i.test(text);
-
-      if (!retriable || attempt === maxAttempts) {
-        return { ok: false, error: `Dify error ${res.status}: ${text}` };
-      }
-
-      await sleep(backoff);
-      backoff = Math.min(backoff * 2, 8000);
-    } catch (error) {
-      if (attempt === maxAttempts) {
-        return { ok: false, error: `Dify request failed: ${error.message}` };
-      }
-      await sleep(backoff);
-      backoff = Math.min(backoff * 2, 8000);
-    }
-  }
-
-  return { ok: false, error: 'dify_failed' };
-}
-
-async function streamToBuffer(stream) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    stream.on('data', (chunk) => chunks.push(chunk));
-    stream.on('end', () => resolve(Buffer.concat(chunks)));
-    stream.on('error', (err) => reject(err));
-  });
-}
-
-async function fetchLineImage(lineClient, messageId) {
-  const contentStream = await lineClient.getMessageContent(messageId);
-  const buffer = await streamToBuffer(contentStream);
-  if (!buffer || buffer.length === 0) {
-    throw new Error('Empty image buffer');
-  }
-  return buffer;
-}
-
-async function analyzeImage(buffer) {
-  const sizeKb = Math.round(buffer.length / 1024);
-  const hash = crypto.createHash('md5').update(buffer).digest('hex').slice(0, 12);
-
-  return {
-    status: 'success',
-    metrics: {
-      file_size_kb: sizeKb,
-      content_hash: hash,
-    },
-  };
-}
-
-function buildImageAnalysisMessage(analysis) {
-  const metrics = analysis?.metrics || {};
-  const lines = [
-    '画像解析の簡易結果です。',
-    `・ファイルサイズ: 約 ${metrics.file_size_kb ?? '-'} KB`,
-    `・コンテンツハッシュ（短縮）: ${metrics.content_hash ?? '-'}`,
-  ];
-  return lines.join('\n');
-}
-
-function buildImageFallback(reason) {
-  const suffix = reason ? `（理由: ${reason}）` : '';
-  return `画像解析が混雑しています。時間をおいて再度お試しください。${suffix}`;
-}
-
-function buildDifyPayloadForImage(userId, analysis) {
-  const metrics = analysis?.metrics || {};
-  return {
-    query:
-      '以下の画像メタ情報をもとにAIKA18号として簡潔で丁寧なコメントを作成してください。' +
-      '過度に失礼な表現は禁止とし、ユーザーが理解しやすい言葉遣いでまとめてください。',
-    inputs: {
-      file_size_kb: String(metrics.file_size_kb ?? ''),
-      content_hash: String(metrics.content_hash ?? ''),
-    },
-    user: userId,
-    response_mode: 'blocking',
-  };
-}
-
-async function replyOrPushMessage(lineClient, replyToken, userId, messages) {
-  const payload = Array.isArray(messages) ? messages : [{ type: 'text', text: messages }];
-  if (replyToken) {
-    try {
-      await lineClient.replyMessage(replyToken, payload);
-      return;
-    } catch (error) {
-      const status = error?.statusCode || error?.status;
-      if (status && Number(status) !== 400) {
-        console.warn('replyMessage failed, fallback to push:', error);
-      }
-    }
-  }
-  if (userId) {
-    await lineClient.pushMessage(userId, payload);
-  } else {
-    console.warn('pushMessage skipped: userId is missing');
-  }
-}
-const DIFY_BASE_URL = (process.env.DIFY_BASE_URL || 'https://api.dify.ai').replace(/\/$/, '');
-const DIFY_APP_ID = process.env.DIFY_APP_ID || null;
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function callDifyBlocking(payload, { maxAttempts = 3, timeoutMs = 15000 } = {}) {
-  const apiKey = process.env.DIFY_API_KEY;
-  if (!apiKey) {
-    return { ok: false, error: 'Missing DIFY_API_KEY' };
-  }
-
-  const appQuery = DIFY_APP_ID ? `?app_id=${encodeURIComponent(DIFY_APP_ID)}` : '';
-  const url = `${DIFY_BASE_URL}/v1/chat-messages${appQuery}`;
-  let backoff = 1000;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timer);
-      const text = await res.text();
-
-      if (res.ok) {
-        try {
-          const json = JSON.parse(text);
-          return { ok: true, data: json };
-        } catch {
-          return { ok: true, data: { answer: text } };
-        }
-      }
-
-      const retriable =
-        res.status === 429 ||
-        res.status === 503 ||
-        /503\s+UNAVAILABLE/i.test(text) ||
-        /model is overloaded/i.test(text);
-
-      if (!retriable || attempt === maxAttempts) {
-        return { ok: false, error: `Dify error ${res.status}: ${text}` };
-      }
-
-      await sleep(backoff);
-      backoff = Math.min(backoff * 2, 8000);
-    } catch (error) {
-      if (attempt === maxAttempts) {
-        return { ok: false, error: `Dify request failed: ${error.message}` };
-      }
-      await sleep(backoff);
-      backoff = Math.min(backoff * 2, 8000);
-    }
-  }
-
-  return { ok: false, error: 'dify_failed' };
-}
-
-async function streamToBuffer(stream) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    stream.on('data', (chunk) => chunks.push(chunk));
-    stream.on('end', () => resolve(Buffer.concat(chunks)));
-    stream.on('error', (err) => reject(err));
-  });
-}
-
-async function fetchLineImage(lineClient, messageId) {
-  const contentStream = await lineClient.getMessageContent(messageId);
-  const buffer = await streamToBuffer(contentStream);
-  if (!buffer || buffer.length === 0) {
-    throw new Error('Empty image buffer');
-  }
-  return buffer;
-}
-
-async function analyzeImage(buffer) {
-  const sizeKb = Math.round(buffer.length / 1024);
-  const hash = crypto.createHash('md5').update(buffer).digest('hex').slice(0, 12);
-
-  return {
-    status: 'success',
-    metrics: {
-      file_size_kb: sizeKb,
-      content_hash: hash,
-    },
-  };
-}
-
-function buildImageAnalysisMessage(analysis) {
-  const metrics = analysis?.metrics || {};
-  const lines = [
-    '画像解析の簡易結果です。',
-    `・ファイルサイズ: 約 ${metrics.file_size_kb ?? '-'} KB`,
-    `・コンテンツハッシュ（短縮）: ${metrics.content_hash ?? '-'}`,
-  ];
-  return lines.join('\n');
-}
-
-function buildImageFallback(reason) {
-  const suffix = reason ? `（理由: ${reason}）` : '';
-  return `画像解析が混雑しています。時間をおいて再度お試しください。${suffix}`;
-}
-
-function buildDifyPayloadForImage(userId, analysis) {
-  const metrics = analysis?.metrics || {};
-  return {
-    query:
-      '以下の画像メタ情報をもとにAIKA18号として簡潔なコメントを作成してください。' +
-      '威圧的な表現は避け、ユーザーが理解しやすいカジュアルで丁寧な文章にしてください。',
-    inputs: {
-      file_size_kb: String(metrics.file_size_kb ?? ''),
-      content_hash: String(metrics.content_hash ?? ''),
-    },
-    user: userId,
-    response_mode: 'blocking',
-  };
-}
-
-async function replyOrPushMessage(lineClient, replyToken, userId, message) {
-  const payload = Array.isArray(message) ? message : [{ type: 'text', text: message }];
-  if (replyToken) {
-    try {
-      await lineClient.replyMessage(replyToken, payload);
-      return;
-    } catch (error) {
-      const status = error?.statusCode || error?.status;
-      if (status && Number(status) !== 400) {
-        console.warn('replyMessage failed, fallback to push:', error);
-      }
-    }
-  }
-  await lineClient.pushMessage(userId, payload);
-}
 
 // ================================================================
 // ★ LINE Webhook Router Function (門番) ★
@@ -488,101 +196,6 @@ export const lineWebhookRouter = onRequest(
       const lineClient = new Client({
         channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN
       });
-
-      if (event.type === 'message' && event.message.type === 'image') {
-        const userId = event.source?.userId;
-        const replyToken = event.replyToken;
-        const messageId = event.message.id;
-        console.info(`画像メッセージを検知。処理を開始します。(画像ID: ${messageId}, userId: ${userId})`);
-
-        if (!res.headersSent) {
-          res.status(200).send('OK');
-        }
-
-        (async () => {
-          try {
-            const buffer = await fetchLineImage(lineClient, messageId);
-            console.info(`画像を取得しました: ${buffer.length} bytes`);
-
-            const analysis = await analyzeImage(buffer);
-            let messageText = buildImageAnalysisMessage(analysis);
-
-            const difyPayload = buildDifyPayloadForImage(userId, analysis);
-            const difyResult = await callDifyBlocking(difyPayload, { maxAttempts: 3, timeoutMs: 15000 });
-
-            if (difyResult.ok) {
-              const answer = typeof difyResult.data?.answer === 'string' ? difyResult.data.answer.trim() : '';
-              if (answer) {
-                messageText = answer;
-              } else {
-                messageText += '\n（AIコメント生成は混雑のため簡易結果のご提供です）';
-              }
-            } else {
-              console.warn('Dify image response fallback:', difyResult.error);
-              messageText += '\n（AIコメント生成は混雑のため簡易結果のご提供です）';
-            }
-
-            await replyOrPushMessage(lineClient, replyToken, userId, messageText);
-          } catch (error) {
-            console.error('画像メッセージ処理でエラーが発生しました:', error);
-            try {
-              await replyOrPushMessage(lineClient, replyToken, userId, buildImageFallback(error.message));
-            } catch (pushError) {
-              console.error('画像フォールバックの送信にも失敗しました:', pushError);
-            }
-          }
-        })();
-
-        return;
-      }
-
-      if (event.type === 'message' && event.message.type === 'image') {
-        const userId = event.source?.userId ?? null;
-        const replyToken = event.replyToken;
-        const messageId = event.message.id;
-        console.info(`画像メッセージを検知。処理を開始します。(画像ID: ${messageId}, userId: ${userId ?? 'unknown'})`);
-
-        if (!res.headersSent) {
-          res.status(200).send('OK');
-        }
-
-        (async () => {
-          try {
-            const buffer = await fetchLineImage(lineClient, messageId);
-            console.info(`画像を取得しました（${buffer.length} bytes）`);
-
-            const analysis = await analyzeImage(buffer);
-            let messageText = buildImageAnalysisMessage(analysis);
-
-            const difyPayload = buildDifyPayloadForImage(userId, analysis);
-            const difyResult = await callDifyBlocking(difyPayload, { maxAttempts: 3, timeoutMs: 15000 });
-
-            if (difyResult.ok) {
-              const answer = typeof difyResult.data?.answer === 'string' ? difyResult.data.answer.trim() : '';
-              if (answer) {
-                messageText = answer;
-              } else {
-                messageText += '\n（AIコメント生成は混雑のため簡易結果のご提供です）';
-              }
-            } else {
-              console.warn('Dify image response fallback:', difyResult.error);
-              messageText += '\n（AIコメント生成は混雑のため簡易結果のご提供です）';
-            }
-
-            await replyOrPushMessage(lineClient, replyToken, userId, messageText);
-            console.info('画像解析の返信を送信しました。');
-          } catch (error) {
-            console.error('画像メッセージ処理でエラーが発生しました:', error);
-            try {
-              await replyOrPushMessage(lineClient, replyToken, userId, buildImageFallback(error.message));
-            } catch (pushError) {
-              console.error('画像フォールバックの送信にも失敗しました:', pushError);
-            }
-          }
-        })();
-
-        return;
-      }
 
       if (event.type === 'message' && event.message.type === 'image') {
         const userId = event.source?.userId ?? null;
