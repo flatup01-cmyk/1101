@@ -671,8 +671,27 @@ Error detected in processvideojob version processvideojob-00034-rok
                         response.raise_for_status()
                 
                 response.raise_for_status()
-                result = response.json()
-                logger.info(f"✅ Dify API呼び出し成功: {result.get('answer', '')[:50]}...")
+                
+                # JSON解析（エラーハンドリング強化）
+                try:
+                    result = response.json()
+                except json.JSONDecodeError as json_error:
+                    logger.error(f"❌ Dify APIレスポンスのJSON解析エラー: {str(json_error)}")
+                    logger.error(f"❌ レスポンス本文: {response.text[:500]}")
+                    if attempt < max_attempts:
+                        wait_time = backoff * (2 ** (attempt - 1))
+                        logger.warning(f"⚠️ JSON解析エラー、リトライします (試行 {attempt}/{max_attempts})")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        raise
+                
+                # レスポンス構造のログ出力（デバッグ用）
+                logger.debug(f"📦 Dify APIレスポンス構造: {json.dumps(result, ensure_ascii=False, indent=2)[:500]}")
+                
+                # メッセージが含まれているか確認
+                answer_preview = result.get('answer', result.get('text', result.get('data', {}).get('answer', '')))[:50]
+                logger.info(f"✅ Dify API呼び出し成功: {answer_preview}...")
                 break
                 
             except requests.exceptions.RequestException as e:
@@ -689,13 +708,42 @@ Error detected in processvideojob version processvideojob-00034-rok
             return None
         
         # MCPスタイルのレスポンスを処理
-        # Difyの標準レスポンスからメッセージを取得
-        raw_message = result.get('answer', result.get('text', ''))
+        # Difyの標準レスポンスからメッセージを取得（複数のパスを試行）
+        raw_message = None
         
-        if not raw_message:
+        # レスポンス構造の可能性を網羅的に確認
+        if isinstance(result, dict):
+            # パターン1: 直接 answer フィールド
+            raw_message = result.get('answer', '')
+            if not raw_message:
+                # パターン2: data.answer
+                data = result.get('data', {})
+                if isinstance(data, dict):
+                    raw_message = data.get('answer', '')
+            if not raw_message:
+                # パターン3: text フィールド
+                raw_message = result.get('text', '')
+            if not raw_message:
+                # パターン4: message フィールド
+                raw_message = result.get('message', '')
+            if not raw_message:
+                # パターン5: content フィールド
+                raw_message = result.get('content', '')
+            if not raw_message:
+                # パターン6: 文字列として返されている場合
+                if isinstance(result, str):
+                    raw_message = result
+        
+        # メッセージが取得できなかった場合の詳細ログとフォールバック
+        if not raw_message or not raw_message.strip():
             logger.warning("⚠️ Dify MCPからメッセージが取得できませんでした")
-            logger.debug(f"Difyレスポンス: {json.dumps(result, ensure_ascii=False)}")
-            return None
+            logger.error(f"❌ Difyレスポンス構造: {json.dumps(result, ensure_ascii=False, indent=2)}")
+            logger.error(f"❌ レスポンスの型: {type(result)}")
+            logger.error(f"❌ レスポンスのキー: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
+            # フォールバック: スコアから直接メッセージを生成
+            logger.info("📝 フォールバック: スコアから直接メッセージを生成します")
+            fallback_message = f"動画を解析したわ。スコア: パンチ{scores.get('punch_speed', 0):.0f}、ガード{scores.get('guard_stability', 0):.0f}、キック{scores.get('kick_height', 0):.0f}、体幹{scores.get('core_rotation', 0):.0f}。"
+            return format_aika_response(fallback_message, scores, user_id)
         
         # Difyの返答を整形（ツンデレ口調、簡潔化、戦闘力明示など）
         formatted_message = format_aika_response(raw_message, scores, user_id)
