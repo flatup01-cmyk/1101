@@ -509,12 +509,15 @@ body {
 
 .intro-visual {
   width: 100%;
-  max-width: 300px;
+  max-width: 100%;
   height: auto;
   border-radius: 12px;
   margin: 0 auto 1rem;
   display: block;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  object-fit: contain;
+  /* モバイルで確実に収まるように */
+  box-sizing: border-box;
 }
 
 .intro-title,
@@ -632,6 +635,12 @@ body {
   .guide-list li {
     font-size: 0.9rem;
   }
+
+  .intro-visual {
+    max-width: 100%;
+    width: 100%;
+    height: auto;
+  }
 }
 
 @media (max-width: 480px) {
@@ -694,6 +703,8 @@ body {
   }
 
   .intro-visual {
-    max-width: 250px;
+    max-width: 100%;
+    width: 100%;
+    height: auto;
   }
 }

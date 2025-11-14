@@ -73,7 +73,7 @@ function createUploadView() {
       <section class="intro-card">
         <img
           class="intro-visual"
-          src="https://ik.imagekit.io/FLATUPGYM/b9d4a676-0903-444c-91d2-50222dc3294f.png?updatedAt=1760340781490"
+          src="https://ik.imagekit.io/FLATUPGYM/b9d4a676-0903-444c-91d2-50222dc3294f.png?updatedAt=1760340781490&tr=w-600,f-auto,q-auto"
           alt="AIKA19が案内する格闘技解析UIのビジュアル"
           loading="lazy"
         />
