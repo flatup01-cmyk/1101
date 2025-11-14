@@ -151,12 +151,26 @@ def call_dify_via_mcp(scores, user_id):
     
     try:
         # HTTPヘッダーはASCIIのみ（latin-1エンコーディングエラーを防ぐ）
+        # ヘッダーの値を明示的にASCII文字列として扱う
+        def ensure_ascii_header(value):
+            """ヘッダー値をASCII文字列に変換"""
+            if isinstance(value, str):
+                # ASCII文字のみを保持
+                return value.encode('ascii', 'ignore').decode('ascii')
+            return str(value).encode('ascii', 'ignore').decode('ascii')
+        
+        # APIキーがASCII文字列であることを確認
+        api_key_ascii = ensure_ascii_header(DIFY_API_KEY)
+        
         headers = {
-            'Authorization': f'Bearer {DIFY_API_KEY}',
+            'Authorization': f'Bearer {api_key_ascii}',
             'Accept': 'application/json',
             'Content-Type': 'application/json',
             'User-Agent': 'AIKA-Video-Analyzer/1.0'
         }
+        
+        # すべてのヘッダー値をASCII文字列として確認
+        headers = {k: ensure_ascii_header(v) for k, v in headers.items()}
         
         # MCPプロトコル形式のリクエスト
         # Difyの標準APIを使用し、MCP互換の形式でデータを送信
