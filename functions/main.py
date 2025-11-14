@@ -157,71 +157,76 @@ def format_aika_response(raw_message, scores, user_id):
             scores.get('core_rotation', 0)
         ) / 4
         
-        # Difyの返答を簡潔化（重複除去、最大3文まで）
-        sentences = [s.strip() for s in raw_message.replace('\n', '。').split('。') if s.strip()]
+        # Difyの返答を簡潔化（重複除去、最大2文まで）
+        sentences = [s.strip() for s in raw_message.replace('\n', '。').replace('！', '。').replace('？', '。').split('。') if s.strip() and len(s.strip()) > 5]
         seen = set()
         unique_sentences = []
-        for s in sentences[:3]:  # 最大3文まで
-            if s and s not in seen:
-                seen.add(s)
-                unique_sentences.append(s)
-        dify_summary = ' '.join(unique_sentences) if unique_sentences else "動画を解析したわ。"
+        for s in sentences[:2]:  # 最大2文まで
+            s_clean = s[:50]  # 50文字まで
+            if s_clean and s_clean not in seen:
+                seen.add(s_clean)
+                unique_sentences.append(s_clean)
+        dify_summary = '。'.join(unique_sentences) + '。' if unique_sentences else ""
         
-        # ツンデレ口調で整形
+        # ツンデレ口調で整形（性別対応）
         if user_gender == 'female':
-            # 女性には優しく
-            opening = "…まあ、悪くないんじゃない？"
-            closing_encouragement = "この調子で続けてね。応援してるわ。"
+            opening = "…まあ、悪くないわね。"
+            tone = "優しく"
         else:
-            # 男性には厳しく
-            opening = "…まあ、このくらいできて当たり前だけどね。"
-            closing_encouragement = "もっと頑張りなさい。期待してるわよ。"
+            opening = "…まあ、このくらいできて当たり前だけど。"
+            tone = "厳しく"
         
-        # 戦闘力評価
-        if total_power >= 80:
-            power_comment = f"戦闘力は{total_power:.0f}。まあまあね。"
+        # 戦闘力評価（数値明示）
+        power_int = int(round(total_power))
+        if power_int >= 80:
+            power_comment = f"戦闘力は{power_int}。まあまあね。"
             if scores.get('punch_speed', 0) >= 80 and scores.get('guard_stability', 0) >= 70:
-                reason = "パンチの速度とガードの安定性が良いわ。でも、もっと体幹の回転を意識して。"
+                reason = "パンチの速度とガードが良いわ。でも体幹の回転を意識して。"
             elif scores.get('kick_height', 0) >= 80:
-                reason = "キックの高さは良いわね。でも、ガードの安定性をもっと上げて。"
+                reason = "キックの高さは良いけど、ガードの安定性を上げて。"
             else:
-                reason = "全体的にバランスは取れてるけど、各項目をもう少し伸ばせるわ。"
-        elif total_power >= 60:
-            power_comment = f"戦闘力は{total_power:.0f}。まだまだね。"
-            reason = "基本的な動きはできてるけど、キックの高さと体幹の回転が足りないわ。"
+                reason = "バランスは取れてるけど、各項目をもう少し伸ばせるわ。"
+        elif power_int >= 60:
+            power_comment = f"戦闘力は{power_int}。まだまだね。"
+            reason = "基本はできてるけど、キックの高さと体幹の回転が足りないわ。"
         else:
-            power_comment = f"戦闘力は{total_power:.0f}。…もっと練習が必要ね。"
-            reason = "基礎から見直した方がいいわ。特にガードの安定性とパンチの速度を意識して。"
+            power_comment = f"戦闘力は{power_int}。…もっと練習が必要ね。"
+            reason = "基礎から見直して。特にガードの安定性とパンチの速度を意識して。"
         
-        # 改善点
+        # 改善点（簡潔に）
         improvements = []
         if scores.get('guard_stability', 0) < 70:
-            improvements.append("ガードをもっと安定させて")
+            improvements.append("ガードの安定")
         if scores.get('kick_height', 0) < 70:
-            improvements.append("キックの高さを上げて")
+            improvements.append("キックの高さ")
         if scores.get('core_rotation', 0) < 70:
-            improvements.append("体幹の回転を意識して")
+            improvements.append("体幹の回転")
         if scores.get('punch_speed', 0) < 70:
-            improvements.append("パンチの速度を上げて")
+            improvements.append("パンチの速度")
         
         improvement_text = ""
         if improvements:
-            improvement_text = f"次は{'、'.join(improvements[:3])}。"
+            improvement_text = f"次は{'と'.join(improvements[:2])}を意識して。"
+        
+        # 励ましの言葉（性別対応）
+        if user_gender == 'female':
+            encouragement = "この調子で続けて。応援してるわ。"
+        else:
+            encouragement = "もっと頑張りなさい。期待してるわよ。"
         
         # ジムへの動線
         gym_message = "\n\nジムで直接見てもらいたい時は、いつでも来てね。一緒に練習しましょう。"
         
-        # 最終メッセージを組み立て（Difyの返答も含める）
-        formatted = f"""{opening}
-
-{power_comment}
-{reason}
-
-{dify_summary}
-
-{improvement_text}
-
-{closing_encouragement}{gym_message}"""
+        # 最終メッセージを組み立て（簡潔に、重複カット）
+        parts = [opening, power_comment, reason]
+        if dify_summary:
+            parts.append(dify_summary)
+        if improvement_text:
+            parts.append(improvement_text)
+        parts.append(encouragement)
+        parts.append(gym_message)
+        
+        formatted = '\n\n'.join([p for p in parts if p])
         
         return formatted.strip()
         
