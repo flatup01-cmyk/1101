@@ -295,12 +295,34 @@ def call_dify_via_mcp(scores, user_id):
                     
                     response = Urllib3Response(urllib3_response)
                 except Exception as urllib3_error:
-                    # urllib3でエラーが発生した場合、requestsにフォールバック
+                    # urllib3でエラーが発生した場合、requestsにフォールバック（最終手段）
                     logger.warning(f"⚠️ urllib3でエラーが発生、requestsにフォールバック: {str(urllib3_error)}")
                     # requests.Sessionを使用（最後の手段）
+                    # ヘッダーを再度ASCII文字列として確認
+                    final_headers = {}
+                    for k, v in urllib3_headers.items():
+                        final_key = str(k).encode('ascii', 'ignore').decode('ascii')
+                        final_value = str(v).encode('ascii', 'ignore').decode('ascii')
+                        final_headers[final_key] = final_value
+                    
+                    # JSONペイロードを文字列としてエンコード（json=パラメータを使わない）
+                    json_str = json.dumps(payload, ensure_ascii=False)
+                    json_bytes = json_str.encode('utf-8')
+                    
+                    # Content-Typeヘッダーを明示的に設定
+                    final_headers['Content-Type'] = 'application/json'
+                    
                     session = requests.Session()
-                    req = requests.Request('POST', api_url, headers=urllib3_headers, json=payload)
+                    req = requests.Request('POST', api_url, headers=final_headers, data=json_bytes)
                     prepared = session.prepare_request(req)
+                    # ヘッダーを再度確認
+                    for header_name, header_value in list(prepared.headers.items()):
+                        try:
+                            header_value.encode('latin-1')
+                        except UnicodeEncodeError:
+                            # エンコードできない場合は除去
+                            del prepared.headers[header_name]
+                            logger.warning(f"⚠️ ヘッダー '{header_name}' を除去しました（latin-1エンコード不可）")
                     response = session.send(prepared, timeout=30)
                 
                 # 503/429エラーの場合はリトライ（指数バックオフ）
