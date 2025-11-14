@@ -116,6 +116,7 @@ DIFY_API_ENDPOINT = (
     or 'https://api.dify.ai/v1/chat-messages'
 )
 DIFY_API_KEY = os.environ.get('DIFY_API_KEY')
+DIFY_APP_ID = os.environ.get('DIFY_APP_ID')  # オプション: DifyアプリID
 
 # 環境変数の検証（警告のみ、関数の実行は継続）
 if not DIFY_API_KEY:
@@ -234,13 +235,20 @@ def call_dify_via_mcp(scores, user_id):
                 # デバッグログ: ヘッダーを確認
                 logger.debug(f"📤 送信ヘッダー: {json.dumps(safe_headers, ensure_ascii=False)}")
                 
+                # DIFY_APP_IDが設定されている場合はURLに追加
+                api_url = DIFY_API_ENDPOINT
+                if DIFY_APP_ID:
+                    separator = '&' if '?' in api_url else '?'
+                    api_url = f"{api_url}{separator}app_id={DIFY_APP_ID}"
+                    logger.info(f"📤 Dify API URL (app_id付き): {api_url}")
+                
                 # requests.Sessionを使用して、ヘッダーのエンコーディング問題を回避
                 session = requests.Session()
                 
                 # PreparedRequestを使用してヘッダーを事前に処理
                 req = requests.Request(
                     'POST',
-                    DIFY_API_ENDPOINT,
+                    api_url,
                     headers=safe_headers,
                     json=payload
                 )
@@ -260,18 +268,23 @@ def call_dify_via_mcp(scores, user_id):
                             logger.warning(f"⚠️ ヘッダー '{header_name}' の値をASCII文字列に変換しました")
                 
                 # セッションでリクエストを送信
+                logger.info(f"📤 Dify API呼び出し開始 (試行 {attempt}/{max_attempts})")
                 response = session.send(prepared, timeout=30)
                 
-                # 503/429エラーの場合はリトライ
+                # 503/429エラーの場合はリトライ（指数バックオフ）
                 if response.status_code in (503, 429):
                     if attempt < max_attempts:
                         wait_time = backoff * (2 ** (attempt - 1))
                         logger.warning(f"⚠️ Dify API returned {response.status_code}, retrying in {wait_time}s (attempt {attempt}/{max_attempts})")
                         time.sleep(wait_time)
                         continue
+                    else:
+                        logger.error(f"❌ Dify API returned {response.status_code} after {max_attempts} attempts")
+                        response.raise_for_status()
                 
                 response.raise_for_status()
                 result = response.json()
+                logger.info(f"✅ Dify API呼び出し成功: {result.get('answer', '')[:50]}...")
                 break
                 
             except requests.exceptions.RequestException as e:
