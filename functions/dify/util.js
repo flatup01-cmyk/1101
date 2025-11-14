@@ -22,9 +22,10 @@ export function sanitizeHeaderValue(value) {
     throw new Error(`Header value must be a string, got ${typeof value}`);
   }
   // ASCII印字可能文字（0x20-0x7E）のみを保持
-  // 制御文字、改行、非ASCII文字を除去
+  // 制御文字、改行、非ASCII文字、引用符、バックスラッシュを除去
   return value
-    .replace(/[\x00-\x1F\x7F-\xFF]/g, '') // 制御文字と非ASCII文字を除去
+    .replace(/[\x00-\x1F\x7F-\xFF"\\]/g, '') // 制御文字、非ASCII文字、引用符、バックスラッシュを除去
+    .replace(/\r\n|\r|\n/g, '') // 改行文字を明示的に除去
     .trim();
 }
 
@@ -37,9 +38,18 @@ export function sanitizeApiKey(apiKey) {
   if (!apiKey || typeof apiKey !== 'string') {
     throw new Error('API key must be a non-empty string');
   }
-  const sanitized = sanitizeHeaderValue(apiKey);
-  if (!sanitized) {
-    throw new Error('API key contains no valid ASCII characters');
+  // まず改行と空白を除去
+  const trimmed = apiKey.trim().replace(/\r\n|\r|\n/g, '');
+  if (!trimmed) {
+    throw new Error('API key is empty after trimming');
+  }
+  const sanitized = sanitizeHeaderValue(trimmed);
+  if (!sanitized || sanitized.length === 0) {
+    throw new Error('API key contains no valid ASCII characters after sanitization');
+  }
+  // 最終確認: ASCII印字可能文字のみかチェック
+  if (!/^[\x20-\x7E]+$/.test(sanitized)) {
+    throw new Error('API key contains invalid characters after sanitization');
   }
   return sanitized;
 }

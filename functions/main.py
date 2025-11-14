@@ -167,7 +167,12 @@ def call_dify_via_mcp(scores, user_id):
             return None
         
         # APIキーを確実にASCII文字列に変換（非ASCII文字を除去）
-        api_key_ascii = DIFY_API_KEY.encode('ascii', 'ignore').decode('ascii')
+        # まず改行と空白を除去
+        api_key_cleaned = DIFY_API_KEY.strip().replace('\r\n', '').replace('\r', '').replace('\n', '')
+        # ASCII文字のみを保持
+        api_key_ascii = api_key_cleaned.encode('ascii', 'ignore').decode('ascii')
+        # 制御文字を除去（ASCII印字可能文字のみ: 0x20-0x7E）
+        api_key_ascii = ''.join(c for c in api_key_ascii if 32 <= ord(c) <= 126)
         if not api_key_ascii:
             logger.error("❌ DIFY_API_KEYがASCII文字列に変換できませんでした")
             return None
