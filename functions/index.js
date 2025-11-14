@@ -223,13 +223,11 @@ export const lineWebhookRouter = onRequest(
               if (answer) {
                 messageText = answer;
               } else {
-                messageText += '
-（AIコメント生成は混雑のため簡易結果のご提供です）';
+                messageText += '\n（AIコメント生成は混雑のため簡易結果のご提供です）';
               }
             } else {
               console.warn('Dify image response fallback:', difyResult.error);
-              messageText += '
-（AIコメント生成は混雑のため簡易結果のご提供です）';
+              messageText += '\n（AIコメント生成は混雑のため簡易結果のご提供です）';
             }
 
             await replyOrPushMessage(lineClient, replyToken, userId, messageText);
