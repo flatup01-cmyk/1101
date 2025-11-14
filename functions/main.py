@@ -28,12 +28,13 @@ from google.cloud.secretmanager_v1 import SecretManagerServiceClient
 from tenacity import retry, stop_after_attempt, wait_exponential, RetryError
 from analyze import analyze_kickboxing_form
 from rate_limiter import check_rate_limit
-from gcloud_auth import (
-    get_storage_client_with_auth,
-    get_firestore_client_with_auth,
-    get_secret_manager_client_with_auth,
-    validate_gcp_project_id
-)
+# gcloud_authはCloud Run環境では不要（デフォルト認証を使用）
+# from gcloud_auth import (
+#     get_storage_client_with_auth,
+#     get_firestore_client_with_auth,
+#     get_secret_manager_client_with_auth,
+#     validate_gcp_project_id
+# )
 
 # Firebase Functions Framework
 import functions_framework
@@ -51,22 +52,22 @@ def get_storage_client():
     """
     Storageクライアントを取得（遅延初期化）
     
-    指示書に従い、認証ユーティリティを使用してクライアントを初期化する。
+    Cloud Run環境ではデフォルト認証が自動的に使用される。
     """
     global storage_client
     if storage_client is None:
-        storage_client = get_storage_client_with_auth()
+        storage_client = storage.Client()
     return storage_client
 
 def get_firestore_client():
     """
     Firestoreクライアントを取得（遅延初期化）
     
-    指示書に従い、認証ユーティリティを使用してクライアントを初期化する。
+    Cloud Run環境ではデフォルト認証が自動的に使用される。
     """
     global db
     if db is None:
-        db = get_firestore_client_with_auth()
+        db = firestore.Client()
     return db
 
 _secret_client = None
@@ -74,11 +75,11 @@ def get_secret_client():
     """
     Secret Managerクライアントを取得（遅延初期化）
     
-    指示書に従い、認証ユーティリティを使用してクライアントを初期化する。
+    Cloud Run環境ではデフォルト認証が自動的に使用される。
     """
     global _secret_client
     if _secret_client is None:
-        _secret_client = get_secret_manager_client_with_auth()
+        _secret_client = SecretManagerServiceClient()
     return _secret_client
 
 # --- Secret Manager Access Function ---
@@ -104,8 +105,8 @@ def access_secret_version(secret_id, project_id, version_id="latest"):
         raise
 
 # --- Load Secrets at Runtime ---
-# 指示書に従い、プロジェクトID検証ユーティリティを使用
-PROJECT_ID = validate_gcp_project_id()
+# プロジェクトIDを環境変数から取得（Cloud Run環境では自動設定される）
+PROJECT_ID = os.environ.get('GOOGLE_CLOUD_PROJECT') or os.environ.get('GCP_PROJECT') or 'aikaapp-584fa'
 
 # LINEアクセストークンはSecret Managerから読み込み（最優先・セキュリティ強化）
 
