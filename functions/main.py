@@ -234,12 +234,33 @@ def call_dify_via_mcp(scores, user_id):
                 # デバッグログ: ヘッダーを確認
                 logger.debug(f"📤 送信ヘッダー: {json.dumps(safe_headers, ensure_ascii=False)}")
                 
-                response = requests.post(
+                # requests.Sessionを使用して、ヘッダーのエンコーディング問題を回避
+                session = requests.Session()
+                
+                # PreparedRequestを使用してヘッダーを事前に処理
+                req = requests.Request(
+                    'POST',
                     DIFY_API_ENDPOINT,
                     headers=safe_headers,
-                    json=payload,
-                    timeout=30
+                    json=payload
                 )
+                prepared = session.prepare_request(req)
+                
+                # ヘッダーを再度確認（PreparedRequestが処理した後）
+                for header_name, header_value in prepared.headers.items():
+                    # 各ヘッダー値をASCII文字列として確認
+                    if isinstance(header_value, str):
+                        try:
+                            # latin-1でエンコード可能か確認
+                            header_value.encode('latin-1')
+                        except UnicodeEncodeError:
+                            # エンコードできない場合は、ASCII文字のみを保持
+                            safe_value = header_value.encode('ascii', 'ignore').decode('ascii')
+                            prepared.headers[header_name] = safe_value
+                            logger.warning(f"⚠️ ヘッダー '{header_name}' の値をASCII文字列に変換しました")
+                
+                # セッションでリクエストを送信
+                response = session.send(prepared, timeout=30)
                 
                 # 503/429エラーの場合はリトライ
                 if response.status_code in (503, 429):
