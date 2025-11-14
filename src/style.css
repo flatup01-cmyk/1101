@@ -492,6 +492,71 @@ body {
   font-weight: bold;
 }
 
+/* --- Intro & Guide Card Styles --- */
+
+.intro-card,
+.guide-card {
+  width: 100%;
+  max-width: 500px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  background: var(--bg-card);
+  border-radius: 12px;
+  border: 2px solid rgba(255, 107, 157, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  text-align: left;
+}
+
+.intro-visual {
+  width: 100%;
+  max-width: 300px;
+  height: auto;
+  border-radius: 12px;
+  margin: 0 auto 1rem;
+  display: block;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.intro-title,
+.guide-title {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: var(--text-color);
+  margin-bottom: 1rem;
+  text-shadow: 2px 2px 4px var(--text-shadow-color);
+}
+
+.intro-text {
+  font-size: 1rem;
+  color: var(--text-color);
+  line-height: 1.8;
+  margin: 0;
+}
+
+.guide-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.guide-list li {
+  font-size: 1rem;
+  color: var(--text-color);
+  line-height: 1.8;
+  padding: 0.5rem 0;
+  padding-left: 1.5rem;
+  position: relative;
+}
+
+.guide-list li::before {
+  content: '•';
+  position: absolute;
+  left: 0;
+  color: var(--primary-brand-color);
+  font-weight: bold;
+  font-size: 1.2rem;
+}
+
 /* --- Error View Styles --- */
 
 .error-view-container {
@@ -552,6 +617,21 @@ body {
   .upload-title {
     font-size: 1.2rem;
   }
+
+  .intro-card,
+  .guide-card {
+    padding: 1.25rem;
+  }
+
+  .intro-title,
+  .guide-title {
+    font-size: 1.25rem;
+  }
+
+  .intro-text,
+  .guide-list li {
+    font-size: 0.9rem;
+  }
 }
 
 @media (max-width: 480px) {
@@ -596,5 +676,24 @@ body {
 
   .upload-hint {
     padding: 1rem;
+  }
+
+  .intro-card,
+  .guide-card {
+    padding: 1rem;
+  }
+
+  .intro-title,
+  .guide-title {
+    font-size: 1.1rem;
+  }
+
+  .intro-text,
+  .guide-list li {
+    font-size: 0.85rem;
+  }
+
+  .intro-visual {
+    max-width: 250px;
   }
 }
