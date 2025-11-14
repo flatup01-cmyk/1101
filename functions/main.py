@@ -274,13 +274,26 @@ def send_line_message_simple(user_id, message):
         bool: 成功した場合True、失敗した場合False（例外は発生させない）
     """
     try:
-        # Secret ManagerからLINEアクセストークンを取得（バージョン4で固定）
-        # 本番運用の安定性のため、バージョン4を固定参照
-        LINE_CHANNEL_ACCESS_TOKEN = access_secret_version(
-            "LINE_CHANNEL_ACCESS_TOKEN",
-            PROJECT_ID,
-            version_id="4"  # バージョン4に固定（2025-11-08作成）
-        ).strip()
+        # Secret ManagerからLINEアクセストークンを取得（latestバージョンを使用）
+        # 複数のバージョンを試行して確実に取得
+        LINE_CHANNEL_ACCESS_TOKEN = None
+        for version_id in ["latest", "4"]:
+            try:
+                LINE_CHANNEL_ACCESS_TOKEN = access_secret_version(
+                    "LINE_CHANNEL_ACCESS_TOKEN",
+                    PROJECT_ID,
+                    version_id=version_id
+                ).strip()
+                if LINE_CHANNEL_ACCESS_TOKEN:
+                    logger.info(f"✅ LINEアクセストークン取得成功（バージョン: {version_id}）")
+                    break
+            except Exception as e:
+                logger.warning(f"⚠️ バージョン{version_id}の取得に失敗: {str(e)}")
+                continue
+        
+        if not LINE_CHANNEL_ACCESS_TOKEN:
+            logger.error("❌ LINEアクセストークンが取得できませんでした（全バージョン試行済み）")
+            return False
         
         if not LINE_CHANNEL_ACCESS_TOKEN:
             logger.error("❌ LINEアクセストークンが取得できませんでした")
@@ -339,13 +352,26 @@ def send_line_message_with_retry(user_id, message, unique_id):
         bool: 成功した場合True
     """
     try:
-        # Secret ManagerからLINEアクセストークンを取得（バージョン4で固定）
-        # 本番運用の安定性のため、バージョン4を固定参照
-        LINE_CHANNEL_ACCESS_TOKEN = access_secret_version(
-            "LINE_CHANNEL_ACCESS_TOKEN",
-            PROJECT_ID,
-            version_id="4"  # バージョン4に固定（2025-11-08作成）
-        ).strip()
+        # Secret ManagerからLINEアクセストークンを取得（latestバージョンを使用）
+        # 複数のバージョンを試行して確実に取得
+        LINE_CHANNEL_ACCESS_TOKEN = None
+        for version_id in ["latest", "4"]:
+            try:
+                LINE_CHANNEL_ACCESS_TOKEN = access_secret_version(
+                    "LINE_CHANNEL_ACCESS_TOKEN",
+                    PROJECT_ID,
+                    version_id=version_id
+                ).strip()
+                if LINE_CHANNEL_ACCESS_TOKEN:
+                    logger.info(f"✅ LINEアクセストークン取得成功（バージョン: {version_id}）")
+                    break
+            except Exception as e:
+                logger.warning(f"⚠️ バージョン{version_id}の取得に失敗: {str(e)}")
+                continue
+        
+        if not LINE_CHANNEL_ACCESS_TOKEN:
+            logger.error("❌ LINEアクセストークンが取得できませんでした（全バージョン試行済み）")
+            return False
         
         if not LINE_CHANNEL_ACCESS_TOKEN:
             logger.error("❌ LINEアクセストークンが取得できませんでした")
@@ -668,12 +694,33 @@ def process_video(data, context):
             
             # 5. LINE Messaging APIでユーザーに送信（指数関数的バックオフ・リトライ付き）
             logger.info(f"📁 LINE送信開始: user_id={user_id}")
+            line_sent = False
             try:
                 send_line_message_with_retry(user_id, full_message, unique_id)
-                logger.info(f"✅ LINE送信成功: user_id={user_id}")
+                logger.info(f"✅ LINE送信成功（リトライ版）: user_id={user_id}")
+                line_sent = True
             except Exception as send_error:
                 logger.error(f"❌ LINE送信エラー（リトライ後も失敗）: {str(send_error)}")
-                # エラーが発生しても処理は継続（ログに記録済み）
+                # フォールバック: 簡易版を試行
+                logger.info(f"🔄 フォールバック: 簡易版LINE送信を試行します...")
+                try:
+                    if send_line_message_simple(user_id, full_message):
+                        logger.info(f"✅ LINE送信成功（フォールバック版）: user_id={user_id}")
+                        line_sent = True
+                    else:
+                        logger.error(f"❌ フォールバック版LINE送信も失敗しました")
+                except Exception as fallback_error:
+                    logger.error(f"❌ フォールバック版LINE送信エラー: {str(fallback_error)}")
+            
+            # LINE送信が失敗した場合でも、Firestoreには結果を保存（後で再送信可能）
+            if not line_sent:
+                logger.warning(f"⚠️ LINE送信に失敗しましたが、処理は継続します。user_id={user_id}, unique_id={unique_id}")
+                # Firestoreに送信失敗フラグを記録
+                processing_doc_ref.set({
+                    'line_send_failed': True,
+                    'line_send_error': 'All retry attempts failed',
+                    'updated_at': firestore.SERVER_TIMESTAMP
+                }, merge=True)
             
             # 【データ整合性】Firestoreを更新（分析結果とステータス）
             logger.info(f"📁 Firestore更新開始: unique_id={unique_id}")
