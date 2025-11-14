@@ -127,6 +127,101 @@ if not DIFY_API_KEY:
     # 本番環境では環境変数が必須だが、関数の実行は継続（エラーで停止しない）
 
 
+# --- AIKA返答整形関数 ---
+def format_aika_response(raw_message, scores, user_id):
+    """
+    Difyの返答をツンデレ口調で整形
+    - 簡潔化・重複除去
+    - 戦闘力（総合スコア）を明示
+    - 理由を後付け
+    - 改善点・励ましの言葉を追加
+    - 男性に厳しく、女性に優しく
+    - ジムへの動線を追加
+    """
+    try:
+        # ユーザーの性別を取得（デフォルトは不明）
+        db = get_firestore_client()
+        user_gender = 'unknown'
+        try:
+            user_profile = db.collection('user_profiles').document(user_id).get()
+            if user_profile.exists:
+                user_gender = user_profile.to_dict().get('gender', 'unknown')
+        except:
+            pass
+        
+        # 総合戦闘力を計算
+        total_power = (
+            scores.get('punch_speed', 0) +
+            scores.get('guard_stability', 0) +
+            scores.get('kick_height', 0) +
+            scores.get('core_rotation', 0)
+        ) / 4
+        
+        # 重複を除去し、簡潔化
+        lines = raw_message.split('\n')
+        seen = set()
+        unique_lines = []
+        for line in lines:
+            line_stripped = line.strip()
+            if line_stripped and line_stripped not in seen:
+                seen.add(line_stripped)
+                unique_lines.append(line_stripped)
+        cleaned_message = ' '.join(unique_lines[:5])  # 最大5行まで
+        
+        # ツンデレ口調で整形
+        if user_gender == 'female':
+            # 女性には優しく
+            opening = "…まあ、悪くないんじゃない？"
+            closing_encouragement = "この調子で続けてね。応援してるわ。"
+        else:
+            # 男性には厳しく
+            opening = "…まあ、このくらいできて当たり前だけどね。"
+            closing_encouragement = "もっと頑張りなさい。期待してるわよ。"
+        
+        # 戦闘力評価
+        if total_power >= 80:
+            power_comment = f"戦闘力は{total_power:.0f}。まあまあね。"
+            reason = "パンチの速度とガードの安定性が良いわ。でも、もっと体幹の回転を意識して。"
+        elif total_power >= 60:
+            power_comment = f"戦闘力は{total_power:.0f}。まだまだね。"
+            reason = "基本的な動きはできてるけど、キックの高さと体幹の回転が足りないわ。"
+        else:
+            power_comment = f"戦闘力は{total_power:.0f}。…もっと練習が必要ね。"
+            reason = "基礎から見直した方がいいわ。特にガードの安定性とパンチの速度を意識して。"
+        
+        # 改善点
+        improvements = []
+        if scores.get('guard_stability', 0) < 70:
+            improvements.append("ガードをもっと安定させて")
+        if scores.get('kick_height', 0) < 70:
+            improvements.append("キックの高さを上げて")
+        if scores.get('core_rotation', 0) < 70:
+            improvements.append("体幹の回転を意識して")
+        
+        improvement_text = ""
+        if improvements:
+            improvement_text = f"次は{'、'.join(improvements)}。"
+        
+        # ジムへの動線
+        gym_message = "\n\nジムで直接見てもらいたい時は、いつでも来てね。一緒に練習しましょう。"
+        
+        # 最終メッセージを組み立て
+        formatted = f"""{opening}
+
+{power_comment}
+{reason}
+
+{improvement_text}
+
+{closing_encouragement}{gym_message}"""
+        
+        return formatted.strip()
+        
+    except Exception as e:
+        logger.error(f"❌ AIKA返答整形エラー: {str(e)}")
+        # エラー時は元のメッセージを返す
+        return raw_message
+
 # --- MCP連携関数 ---
 def call_dify_via_mcp(scores, user_id):
     """
@@ -152,22 +247,243 @@ def call_dify_via_mcp(scores, user_id):
         return None
     
     try:
-        # HTTPヘッダーはASCIIのみ（latin-1エンコーディングエラーを防ぐ）
-        # ヘッダーの値を明示的にASCII文字列として扱う
-        def ensure_ascii_header(value):
-            """ヘッダー値をASCII文字列に変換"""
-            if isinstance(value, str):
-                # ASCII文字のみを保持
-                return value.encode('ascii', 'ignore').decode('ascii')
-            return str(value).encode('ascii', 'ignore').decode('ascii')
-        
-        # APIキーがASCII文字列であることを確認（確実に処理）
-        if not DIFY_API_KEY:
-            logger.error("❌ DIFY_API_KEYが空です")
-            return None
-        
-        # APIキーを確実にASCII文字列に変換（非ASCII文字を除去）
-        # まず改行と空白を除去
+
+コンソールのロゴ
+スラッシュ（/）を使用してリソース、ドキュメント、プロダクトなどを検索
+
+
+オブザーバビリティ スコープ
+AIKAAPP
+ログ エクスプローラ
+すべてのフィールドを検索
+1
+言語: 
+LQL
+タイムライン
+
+
+2,260 件の結果
+重大度
+時間
+概要
+古いエントリを表示するには:
+2025-11-14 15:46:23.832
+
+POST
+
+200
+
+125 B
+
+25.692 s
+
+APIs-Google; (+https://developers.google.com/webmasters/APIs-Google.html)
+https://process-video-trigger-kvuv4ufotq-uc.a.run.app/?__GCP_CloudEventsMode=GCS_NOTIFICATION
+2025-11-14 15:46:23.862
+Starting new instance. Reason: AUTOSCALING - Instance started due to configured scaling factors (e.g. CPU utilization, request throughput, etc.) or no existing capacity for current traffic.
+2025-11-14 15:46:33.385
+Default STARTUP TCP probe succeeded after 1 attempt for container "worker" on port 8080.
+2025-11-14 15:46:33.442
+INFO:main:================================================================================
+2025-11-14 15:46:33.443
+INFO:main:🔔 CloudEvent受信開始
+2025-11-14 15:46:33.443
+INFO:main:📦 CloudEvent全体の型: <class 'cloudevents.http.event.CloudEvent'>
+2025-11-14 15:46:33.443
+INFO:main:📦 CloudEvent全体の内容（最初の1000文字）: {'attributes': {'specversion': '1.0', 'id': '16907821170473146', 'source': '//storage.googleapis.com/projects/_/buckets/aikaapp-584fa.firebasestorage.app', 'type': 'google.cloud.storage.object.v1.finalized', 'datacontenttype': 'application/json', 'subject': 'objects/videos/U521cd38b7f048be84eaa880ccabdc7f9/666bHfJNl0xnBI158DkH/L_hos0TTjAKNqiaXafr0IKrjw2C_CnwMOtIWNRfq34A_Z7Iup9QZ-.mp4', 'time': '2025-11-14T06:46:23.108335Z', 'bucket': 'aikaapp-584fa.firebasestorage.app'}, 'data': {'kind': 'storage#object', 'id': 'aikaapp-584fa.firebasestorage.app/videos/U521cd38b7f048be84eaa880ccabdc7f9/666bHfJNl0xnBI158DkH/L_hos0TTjAKNqiaXafr0IKrjw2C_CnwMOtIWNRfq34A_Z7Iup9QZ-.mp4/1763102783070513', 'selfLink': 'https://www.googleapis.com/storage/v1/b/aikaapp-584fa.firebasestorage.app/o/videos%2FU521cd38b7f048be84eaa880ccabdc7f9%2F666bHfJNl0xnBI158DkH%2FL_hos0TTjAKNqiaXafr0IKrjw2C_CnwMOtIWNRfq34A_Z7Iup9QZ-.mp4', 'name': 'videos/U521cd38b7f048be84eaa880ccabdc7f9/666bHfJNl0xnBI158DkH/L_hos0TTjAKNqiaXafr0I
+2025-11-14 15:46:33.443
+INFO:main:🔔 CloudEvent type: unknown
+2025-11-14 15:46:33.443
+INFO:main:🔔 CloudEvent source: unknown
+2025-11-14 15:46:33.443
+INFO:main:📦 CloudEvent.dataの型: <class 'dict'>
+2025-11-14 15:46:33.443
+INFO:main:📦 CloudEvent.dataの内容（最初の1000文字）: {'kind': 'storage#object', 'id': 'aikaapp-584fa.firebasestorage.app/videos/U521cd38b7f048be84eaa880ccabdc7f9/666bHfJNl0xnBI158DkH/L_hos0TTjAKNqiaXafr0IKrjw2C_CnwMOtIWNRfq34A_Z7Iup9QZ-.mp4/1763102783070513', 'selfLink': 'https://www.googleapis.com/storage/v1/b/aikaapp-584fa.firebasestorage.app/o/videos%2FU521cd38b7f048be84eaa880ccabdc7f9%2F666bHfJNl0xnBI158DkH%2FL_hos0TTjAKNqiaXafr0IKrjw2C_CnwMOtIWNRfq34A_Z7Iup9QZ-.mp4', 'name': 'videos/U521cd38b7f048be84eaa880ccabdc7f9/666bHfJNl0xnBI158DkH/L_hos0TTjAKNqiaXafr0IKrjw2C_CnwMOtIWNRfq34A_Z7Iup9QZ-.mp4', 'bucket': 'aikaapp-584fa.firebasestorage.app', 'generation': '1763102783070513', 'metageneration': '1', 'contentType': 'video/mp4', 'timeCreated': '2025-11-14T06:46:23.108Z', 'updated': '2025-11-14T06:46:23.108Z', 'storageClass': 'REGIONAL', 'timeStorageClassUpdated': '2025-11-14T06:46:23.108Z', 'size': '2886505', 'md5Hash': 'mrJV/qZYIP7XF2LCkMyX6g==', 'mediaLink': 'https://storage.googleapis.com/download/storage/v1/b/aikaapp-584fa.firebases
+2025-11-14 15:46:33.443
+INFO:main:📦 event_dataは辞書形式です。データを抽出...
+2025-11-14 15:46:33.443
+INFO:main:📁 抽出されたデータ: bucket=aikaapp-584fa.firebasestorage.app, name=videos/U521cd38b7f048be84eaa880ccabdc7f9/666bHfJNl0xnBI158DkH/L_hos0TTjAKNqiaXafr0IKrjw2C_CnwMOtIWNRfq34A_Z7Iup9QZ-.mp4
+2025-11-14 15:46:33.443
+INFO:main:📁 処理対象ファイル: videos/U521cd38b7f048be84eaa880ccabdc7f9/666bHfJNl0xnBI158DkH/L_hos0TTjAKNqiaXafr0IKrjw2C_CnwMOtIWNRfq34A_Z7Iup9QZ-.mp4 (バケット: aikaapp-584fa.firebasestorage.app)
+2025-11-14 15:46:33.443
+INFO:main:🚀 process_video関数を呼び出します...
+2025-11-14 15:46:33.443
+INFO:main:📁 process_video関数開始
+2025-11-14 15:46:33.443
+INFO:main:📁 受信データ型: <class 'dict'>
+2025-11-14 15:46:33.443
+INFO:main:📁 受信データ内容: {"bucket": "aikaapp-584fa.firebasestorage.app", "name": "videos/U521cd38b7f048be84eaa880ccabdc7f9/666bHfJNl0xnBI158DkH/L_hos0TTjAKNqiaXafr0IKrjw2C_CnwMOtIWNRfq34A_Z7Iup9QZ-.mp4"}
+2025-11-14 15:46:33.443
+INFO:main:📁 処理開始: videos/U521cd38b7f048be84eaa880ccabdc7f9/666bHfJNl0xnBI158DkH/L_hos0TTjAKNqiaXafr0IKrjw2C_CnwMOtIWNRfq34A_Z7Iup9QZ-.mp4 (bucket: aikaapp-584fa.firebasestorage.app)
+2025-11-14 15:46:33.444
+INFO:main:📁 ユーザーID抽出: U521cd38b7f048be84eaa880ccabdc7f9, JobID抽出: 666bHfJNl0xnBI158DkH
+2025-11-14 15:46:33.444
+INFO:main:📁 レートリミットチェック開始: U521cd38b7f048be84eaa880ccabdc7f9
+2025-11-14 15:46:33.746
+INFO:main:✓ レートリミットチェック通過: U521cd38b7f048be84eaa880ccabdc7f9
+2025-11-14 15:46:33.746
+INFO:main:📁 冪等性チェック開始: jobId=666bHfJNl0xnBI158DkH
+2025-11-14 15:46:34.022
+INFO:main:📁 新規処理としてマーク完了
+2025-11-14 15:46:34.022
+INFO:main:📁 動画ダウンロード開始: videos/U521cd38b7f048be84eaa880ccabdc7f9/666bHfJNl0xnBI158DkH/L_hos0TTjAKNqiaXafr0IKrjw2C_CnwMOtIWNRfq34A_Z7Iup9QZ-.mp4
+2025-11-14 15:46:34.299
+INFO:main:📁 ダウンロード完了: /tmp/tmp3tdfhhrb.mp4
+2025-11-14 15:46:34.446
+INFO:main:📁 動画解析開始: /tmp/tmp3tdfhhrb.mp4
+2025-11-14 15:46:34.739
+INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
+2025-11-14 15:46:35.080
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+2025-11-14 15:46:35.080
+W0000 00:00:1763102795.080677      39 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+2025-11-14 15:46:35.154
+W0000 00:00:1763102795.154479      39 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+2025-11-14 15:46:35.246
+/layers/google.python.pip/pip/lib/python3.12/site-packages/google/protobuf/symbol_database.py:55: UserWarning: SymbolDatabase.GetPrototype() is deprecated. Please use message_factory.GetMessageClass() instead. SymbolDatabase.GetPrototype() will be removed soon.
+2025-11-14 15:46:35.246
+  warnings.warn('SymbolDatabase.GetPrototype() is deprecated. Please '
+2025-11-14 15:46:48.794
+INFO:main:📁 解析結果: {"status": "success", "scores": {"punch_speed": 100, "guard_stability": 64.5, "kick_height": 45.3, "core_rotation": 0}, "error_message": null}
+2025-11-14 15:46:48.794
+INFO:main:📁 Dify API呼び出し開始: user_id=U521cd38b7f048be84eaa880ccabdc7f9
+2025-11-14 15:46:48.794
+INFO:main:📤 Dify MCP呼び出し: {"query": "動画解析結果をもとにAIKA18号として返答してください", "inputs": {"punch_speed_score": "100", "guard_stability_score": "64.5", "kick_height_score": "45.3", "core_rotation_score": "0"}, "user": "U521cd38b7f048be84eaa880ccabdc7f9", "response_mode": "blocking"}
+2025-11-14 15:46:48.927
+ERROR:main:❌ Dify MCP呼び出しエラー: 'latin-1' codec can't encode characters in position 8-10: ordinal not in range(256)
+2025-11-14 15:46:48.934
+Traceback (most recent call last):   File "/workspace/main.py", line 161, in call_dify_via_mcp     response = requests.post(                ^^^^^^^^^^^^^^   File "/layers/google.python.pip/pip/lib/python3.12/site-packages/requests/api.py", line 115, in post     return request("post", url, data=data, json=json, **kwargs)            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^   File "/layers/google.python.pip/pip/lib/python3.12/site-packages/requests/api.py", line 59, in request     return session.request(method=method, url=url, **kwargs)            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^   File "/layers/google.python.pip/pip/lib/python3.12/site-packages/requests/sessions.py", line 589, in request     resp = self.send(prep, **send_kwargs)            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^   File "/layers/google.python.pip/pip/lib/python3.12/site-packages/requests/sessions.py", line 703, in send     r = adapter.send(request, **kwargs)         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^   File "/layers/google.python.pip/pip/lib/python3.12/site-packages/requests/adapters.py", line 486, in send     resp = conn.urlopen(            ^^^^^^^^^^^^^   File "/layers/google.python.pip/pip/lib/python3.12/site-packages/urllib3/connectionpool.py", line 787, in urlopen     response = self._make_request(                ^^^^^^^^^^^^^^^^^^^   File "/layers/google.python.pip/pip/lib/python3.12/site-packages/urllib3/connectionpool.py", line 493, in _make_request     conn.request(   File "/layers/google.python.pip/pip/lib/python3.12/site-packages/urllib3/connection.py", line 493, in request     self.putheader(header, value)   File "/layers/google.python.pip/pip/lib/python3.12/site-packages/urllib3/connection.py", line 407, in putheader     super().putheader(header, *values)   File "/layers/google.python.runtime/python/lib/python3.12/http/client.py", line 1311, in putheader     values[i] = one_value.encode('latin-1')                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^ UnicodeEncodeError: 'latin-1' codec can't encode characters in position 8-10: ordinal not in range(256)
+2025-11-14 15:46:48.935
+WARNING:main:⚠️ Dify MCPからメッセージが取得できませんでした
+2025-11-14 15:46:48.935
+INFO:main:📁 LINE送信開始: user_id=U521cd38b7f048be84eaa880ccabdc7f9
+2025-11-14 15:46:49.984
+INFO:main:✅ LINEメッセージ送信成功: U521cd38b7f048be84eaa880ccabdc7f9
+2025-11-14 15:46:49.985
+INFO:main:✅ LINE送信成功: user_id=U521cd38b7f048be84eaa880ccabdc7f9
+2025-11-14 15:46:49.985
+INFO:main:📁 Firestore更新開始: unique_id=666bHfJNl0xnBI158DkH
+2025-11-14 15:46:50.044
+INFO:main:✅ 処理完了: videos/U521cd38b7f048be84eaa880ccabdc7f9/666bHfJNl0xnBI158DkH/L_hos0TTjAKNqiaXafr0IKrjw2C_CnwMOtIWNRfq34A_Z7Iup9QZ-.mp4 (分析結果をFirestoreに保存)
+2025-11-14 15:46:50.045
+INFO:main:📁 一時ファイル削除: /tmp/tmp3tdfhhrb.mp4
+2025-11-14 15:46:50.045
+INFO:main:✅ 処理完了: {"status": "success", "analysis": {"punch_speed": 100, "guard_stability": 64.5, "kick_height": 45.3, "core_rotation": 0}}
+2025-11-14 15:46:50.045
+INFO:main:================================================================================
+2025-11-14 15:49:10.097
+
+POST
+
+200
+
+135 B
+
+81 ms
+
+LineBotWebhook 2.0
+https://asia-northeast1-aikaapp-584fa.cloudfunctions.net/lineWebhookRouter
+2025-11-14 15:49:10.116
+動画メッセージを検知。処理を開始します。(動画ID: 587658304566591714, ソース: 通常メッセージ, userId: U521cd38b7f048be84eaa880ccabdc7f9) 
+2025-11-14 15:49:10.186
+ユーザーへの受付完了メッセージの送信に成功しました。 
+2025-11-14 15:49:10.188
+動画コンテンツの取得を開始します (ID: 587658304566591714) 
+2025-11-14 15:49:27.396
+
+POST
+
+200
+
+125 B
+
+23 ms
+
+APIs-Google; (+https://developers.google.com/webmasters/APIs-Google.html)
+https://process-video-trigger-kvuv4ufotq-uc.a.run.app/?__GCP_CloudEventsMode=GCS_NOTIFICATION
+2025-11-14 15:49:27.427
+INFO:main:================================================================================
+2025-11-14 15:49:27.427
+INFO:main:🔔 CloudEvent受信開始
+2025-11-14 15:49:27.427
+INFO:main:📦 CloudEvent全体の型: <class 'cloudevents.http.event.CloudEvent'>
+2025-11-14 15:49:27.428
+INFO:main:📦 CloudEvent全体の内容（最初の1000文字）: {'attributes': {'specversion': '1.0', 'id': '16904628653166680', 'source': '//storage.googleapis.com/projects/_/buckets/aikaapp-584fa.firebasestorage.app', 'type': 'google.cloud.storage.object.v1.finalized', 'datacontenttype': 'application/json', 'subject': 'objects/videos/U521cd38b7f048be84eaa880ccabdc7f9/587658304566591714.mp4', 'time': '2025-11-14T06:49:26.741583Z', 'bucket': 'aikaapp-584fa.firebasestorage.app'}, 'data': {'kind': 'storage#object', 'id': 'aikaapp-584fa.firebasestorage.app/videos/U521cd38b7f048be84eaa880ccabdc7f9/587658304566591714.mp4/1763102966736345', 'selfLink': 'https://www.googleapis.com/storage/v1/b/aikaapp-584fa.firebasestorage.app/o/videos%2FU521cd38b7f048be84eaa880ccabdc7f9%2F587658304566591714.mp4', 'name': 'videos/U521cd38b7f048be84eaa880ccabdc7f9/587658304566591714.mp4', 'bucket': 'aikaapp-584fa.firebasestorage.app', 'generation': '1763102966736345', 'metageneration': '1', 'contentType': 'video/mp4', 'timeCreated': '2025-11-14T06:49:26.741Z', 'updated': '
+2025-11-14 15:49:27.428
+INFO:main:🔔 CloudEvent type: unknown
+2025-11-14 15:49:27.428
+INFO:main:🔔 CloudEvent source: unknown
+2025-11-14 15:49:27.428
+INFO:main:📦 CloudEvent.dataの型: <class 'dict'>
+2025-11-14 15:49:27.428
+INFO:main:📦 CloudEvent.dataの内容（最初の1000文字）: {'kind': 'storage#object', 'id': 'aikaapp-584fa.firebasestorage.app/videos/U521cd38b7f048be84eaa880ccabdc7f9/587658304566591714.mp4/1763102966736345', 'selfLink': 'https://www.googleapis.com/storage/v1/b/aikaapp-584fa.firebasestorage.app/o/videos%2FU521cd38b7f048be84eaa880ccabdc7f9%2F587658304566591714.mp4', 'name': 'videos/U521cd38b7f048be84eaa880ccabdc7f9/587658304566591714.mp4', 'bucket': 'aikaapp-584fa.firebasestorage.app', 'generation': '1763102966736345', 'metageneration': '1', 'contentType': 'video/mp4', 'timeCreated': '2025-11-14T06:49:26.741Z', 'updated': '2025-11-14T06:49:26.741Z', 'storageClass': 'REGIONAL', 'timeStorageClassUpdated': '2025-11-14T06:49:26.741Z', 'size': '404941', 'md5Hash': 'EGBzx3CQoGPqsz7JC8QC+w==', 'mediaLink': 'https://storage.googleapis.com/download/storage/v1/b/aikaapp-584fa.firebasestorage.app/o/videos%2FU521cd38b7f048be84eaa880ccabdc7f9%2F587658304566591714.mp4?generation=1763102966736345&alt=media', 'crc32c': 'RJdRHg==', 'etag': 'CNnLo7CG8ZADEAE='}
+2025-11-14 15:49:27.428
+INFO:main:📦 event_dataは辞書形式です。データを抽出...
+2025-11-14 15:49:27.428
+INFO:main:📁 抽出されたデータ: bucket=aikaapp-584fa.firebasestorage.app, name=videos/U521cd38b7f048be84eaa880ccabdc7f9/587658304566591714.mp4
+2025-11-14 15:49:27.428
+INFO:main:📁 処理対象ファイル: videos/U521cd38b7f048be84eaa880ccabdc7f9/587658304566591714.mp4 (バケット: aikaapp-584fa.firebasestorage.app)
+2025-11-14 15:49:27.428
+INFO:main:🚀 process_video関数を呼び出します...
+2025-11-14 15:49:27.428
+INFO:main:📁 process_video関数開始
+2025-11-14 15:49:27.428
+INFO:main:📁 受信データ型: <class 'dict'>
+2025-11-14 15:49:27.428
+INFO:main:📁 受信データ内容: {"bucket": "aikaapp-584fa.firebasestorage.app", "name": "videos/U521cd38b7f048be84eaa880ccabdc7f9/587658304566591714.mp4"}
+2025-11-14 15:49:27.428
+INFO:main:📁 処理開始: videos/U521cd38b7f048be84eaa880ccabdc7f9/587658304566591714.mp4 (bucket: aikaapp-584fa.firebasestorage.app)
+2025-11-14 15:49:27.428
+ERROR:main:❌ セキュリティ: パス構造が不正: videos/U521cd38b7f048be84eaa880ccabdc7f9/587658304566591714.mp4
+2025-11-14 15:49:27.429
+INFO:main:✅ 処理完了: {"status": "error", "reason": "invalid path structure"}
+2025-11-14 15:49:27.429
+INFO:main:================================================================================
+2025-11-14 15:49:27.777
+動画をCloud Storageに保存しました: videos/U521cd38b7f048be84eaa880ccabdc7f9/587658304566591714.mp4 
+2025-11-14 15:49:32.875
+
+IAM Service Account Credentials API
+
+SignBlob
+
+106912817994768744254
+
+639286700347-compute@deve…
+audit_log, method: "SignBlob", principal_email: "639286700347-compute@developer.gserviceaccount.com"
+2025-11-14 15:49:34.477
+署名付きURLを生成しました: https://storage.googleapis.com/aikaapp-584fa.firebasestorage.app/videos/U521cd38b7f048be84eaa880ccab... 
+2025-11-14 15:49:35.476
+Dify処理関数 (processVideoJob) の呼び出しを開始しました。 
+2025-11-14 15:49:36.583
+
+POST
+
+500
+
+219 B
+
+1.275 s
+
+node-fetch
+https://processvideojob-kvuv4ufotq-an.a.run.app/
+2025-11-14 15:49:36.652
+processVideoJob開始: jobId=587658304566591714, lineUserId=U521cd38b7f048be84eaa880ccabdc7f9, videoUrl=https://storage.googleapis.com/aikaapp-584fa.firebasestorage.app/videos/U521cd38b7f048be84eaa880ccabdc7f9/587658304566591714.mp4?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=639286700347-compute%40developer.gserviceaccount.com%2F20251114%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20251114T064927Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=974365b7245562a6640d583446e21e8d28606b9cbe7f1f9ce12248db7b83c3b859b5510a1753f77dbdaacd6b5e829ecfe4db8e30bf18b6a6010eed6fb11fe7a349e64946b095727bf29cd9da17abda14ee5e971caba0b786324998e4bb85de6bc1cc2c270c5a0efe5269cf8b63ad2d4874fc50e01fdc223cb52daced348f3019523b957dd1b0b16f5cf30b0119ce3bfb50899a5a29754089ffc3e9c3b9f5e22cd70d661b43255fad18964f73aed11fab1bc4b62d17ccedaad85051b111a45924aac510380f0332a593cbc99e21387621de2da9eb402fd90776cd883b66c913c9b84fa1cef4e203d0df97335232969af489ea21be250f870608d4fdb911a590b1 
+2025-11-14 15:49:36.653
+Dify APIリクエスト: {"url":"https://api.dify.ai/v1/chat-messages","method":"POST","videoUrl":"https://storage.googleapis.com/aikaapp-584fa.firebasestorage.app/videos/U521cd38b7f048be84eaa880ccabdc7f9/587658304566591714.mp4?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=639286700347-compute%40developer.gserviceaccount.com%2F20251114%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20251114T064927Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=974365b7245562a6640d583446e21e8d28606b9cbe7f1f9ce12248db7b83c3b859b5510a1753f77dbdaacd6b5e829ecfe4db8e30bf18b6a6010eed6fb11fe7a349e64946b095727bf29cd9da17abda14ee5e971caba0b786324998e4bb85de6bc1cc2c270c5a0efe5269cf8b63ad2d4874fc50e01fdc223cb52daced348f3019523b957dd1b0b16f5cf30b0119ce3bfb50899a5a29754089ffc3e9c3b9f5e22cd70d661b43255fad18964f73aed11fab1bc4b62d17ccedaad85051b111a45924aac510380f0332a593cbc99e21387621de2da9eb402fd90776cd883b66c913c9b84fa1cef4e203d0df97335232969af489ea21be250f870608d4fdb911a590b1","userId":"U521cd38b7f048be84eaa880ccabdc7f9","conversationId":null} 
+2025-11-14 15:49:36.659
+動画解析処理でエラーが発生しました: {   error: 'Invalid character in header content ["Authorization"]',   stack: 'TypeError [ERR_INVALID_CHAR]: Invalid character in header content ["Authorization"]\n' +     '    at file:///workspace/node_modules/node-fetch/src/headers.js:101:6\n' +     '    at Array.map (<anonymous>)\n' +     '    at new Headers (file:///workspace/node_modules/node-fetch/src/headers.js:99:12)\n' +     '    at new Request (file:///workspace/node_modules/node-fetch/src/request.js:88:19)\n' +     '    at file:///workspace/node_modules/node-fetch/src/index.js:51:19\n' +     '    at new Promise (<anonymous>)\n' +     '    at fetch (file:///workspace/node_modules/node-fetch/src/index.js:49:9)\n' +     '    at analyzeVideoBlocking (file:///workspace/dify/dify.js:38:21)\n' +     '    at handleVideoJob (file:///workspace/dify/handler.js:111:24)\n' +     '    at file:///workspace/index.js:457:28',   videoUrl: 'https://storage.googleapis.com/aikaapp-584fa.firebasestorage.app/videos/U521cd38b7f048be84eaa880ccab...',   userId: 'U521cd38b7f048be84eaa880ccabdc7f9' } 
+2025-11-14 15:49:36.851
+ユーザーへエラーメッセージを送信しました 
+2025-11-14 15:49:37.865
+processVideoJobでエラー: TypeError [ERR_INVALID_CHAR]: Invalid character in header content ["Authorization"]     at file:///workspace/node_modules/node-fetch/src/headers.js:101:6     at Array.map (<anonymous>)     at new Headers (file:///workspace/node_modules/node-fetch/src/headers.js:99:12)     at new Request (file:///workspace/node_modules/node-fetch/src/request.js:88:19)     at file:///workspace/node_modules/node-fetch/src/index.js:51:19     at new Promise (<anonymous>)     at fetch (file:///workspace/node_modules/node-fetch/src/index.js:49:9)     at analyzeVideoBlocking (file:///workspace/dify/dify.js:38:21)     at handleVideoJob (file:///workspace/dify/handler.js:111:24)     at file:///workspace/index.js:457:28 {   code: 'ERR_INVALID_CHAR' } 
+
+2025-11-14 15:49:40.667
+Error detected in processvideojob version processvideojob-00034-rok
+新しいエントリを表示するには:
+
+
+
         api_key_cleaned = DIFY_API_KEY.strip().replace('\r\n', '').replace('\r', '').replace('\n', '')
         # ASCII文字のみを保持
         api_key_ascii = api_key_cleaned.encode('ascii', 'ignore').decode('ascii')
@@ -361,24 +677,18 @@ def call_dify_via_mcp(scores, user_id):
         
         # MCPスタイルのレスポンスを処理
         # Difyの標準レスポンスからメッセージを取得
-        message = result.get('answer', result.get('text', ''))
+        raw_message = result.get('answer', result.get('text', ''))
         
-        # MCPスタイルのレスポンス構造に変換（将来の拡張用）
-        mcp_response = {
-            'result': {
-                'content': message,
-                'format': 'text'
-            }
-        }
-        
-        if message:
-            logger.info(f"✅ Dify MCP成功: {message[:50]}...")
-            logger.debug(f"MCPレスポンス: {json.dumps(mcp_response, ensure_ascii=False)}")
-            return message
-        else:
+        if not raw_message:
             logger.warning("⚠️ Dify MCPからメッセージが取得できませんでした")
             logger.debug(f"Difyレスポンス: {json.dumps(result, ensure_ascii=False)}")
             return None
+        
+        # Difyの返答を整形（ツンデレ口調、簡潔化、戦闘力明示など）
+        formatted_message = format_aika_response(raw_message, scores, user_id)
+        
+        logger.info(f"✅ Dify MCP成功: {formatted_message[:50]}...")
+        return formatted_message
             
     except requests.exceptions.RequestException as e:
         logger.error(f"❌ Dify MCP APIエラー: {str(e)}")
@@ -817,26 +1127,12 @@ def process_video(data, context):
             
             if not aika_message:
                 logger.warning("⚠️ Dify MCPからメッセージが取得できませんでした")
-                # デフォルトメッセージを使用
-                aika_message = "…別に、アンタの動画を解析してやってもいいけど？"
+                # デフォルトメッセージを使用（整形関数を通す）
+                scores = analysis_result['scores']
+                aika_message = format_aika_response("動画を解析しました。", scores, user_id)
             
-            # 解析結果を日本語と英語でフォーマット
-            scores = analysis_result['scores']
-            avg_score = (scores.get('punch_speed', 0) + scores.get('guard_stability', 0) + 
-                        scores.get('kick_height', 0) + scores.get('core_rotation', 0)) / 4
-            
-            # 英語の解析結果を追加
-            english_summary = (
-                f"\n\n--- Analysis Results (English) ---\n"
-                f"Punch Speed: {scores.get('punch_speed', 0):.1f}/100\n"
-                f"Guard Stability: {scores.get('guard_stability', 0):.1f}/100\n"
-                f"Kick Height: {scores.get('kick_height', 0):.1f}/100\n"
-                f"Core Rotation: {scores.get('core_rotation', 0):.1f}/100\n"
-                f"Average Score: {avg_score:.1f}/100"
-            )
-            
-            # 日本語と英語を結合
-            full_message = aika_message + english_summary
+            # 整形済みメッセージをそのまま使用（既にformat_aika_responseで整形済み）
+            full_message = aika_message
             
             # 5. LINE Messaging APIでユーザーに送信（指数関数的バックオフ・リトライ付き）
             logger.info(f"📁 LINE送信開始: user_id={user_id}")
