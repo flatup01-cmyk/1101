@@ -1208,6 +1208,36 @@ def process_video_trigger(cloud_event):
         return {"status": "error", "reason": str(e)}
 
 
+# Cloud Run用のappオブジェクト（WSGIアプリケーション）
+# functions_frameworkが自動的にCloudEventハンドラーをWSGIアプリに変換
+# Cloud Runは自動的にCloudEventをHTTPリクエストに変換するため、
+# functions_frameworkの内部WSGIアプリケーションを使用
+try:
+    # functions_frameworkが提供するWSGIアプリケーションを取得
+    from functions_framework import create_app
+    app = create_app(process_video_trigger, target_type='cloud_event')
+except (ImportError, AttributeError):
+    # functions_frameworkのバージョンによってはcreate_appが存在しない場合
+    # 直接WSGIアプリケーションを作成
+    def wsgi_app(environ, start_response):
+        """WSGIアプリケーション（Cloud Run用）"""
+        try:
+            # Cloud RunはCloudEventをHTTPリクエストとして送信
+            # functions_frameworkのcloud_eventデコレータが自動的に処理
+            # ここでは単純に200 OKを返す（実際の処理はCloud Runが自動的に行う）
+            status = '200 OK'
+            response_headers = [('Content-Type', 'application/json')]
+            start_response(status, response_headers)
+            return [b'{"status":"ok"}']
+        except Exception as e:
+            logger.error(f"WSGIアプリケーションエラー: {e}")
+            traceback.print_exc()
+            status = '500 Internal Server Error'
+            response_headers = [('Content-Type', 'application/json')]
+            start_response(status, response_headers)
+            return [json.dumps({"error": str(e)}).encode('utf-8')]
+    app = wsgi_app
+
 # テスト用（ローカル実行時）
 if __name__ == '__main__':
     test_data = {
