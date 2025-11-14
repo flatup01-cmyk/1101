@@ -1208,7 +1208,3 @@ def process_video_trigger(cloud_event):
         return {"status": "error", "reason": str(e)}
 
 
-# Cloud Run用のappオブジェクト（WSGIアプリケーション）
-# functions_frameworkが自動的にCloudEventハンドラーをWSGIアプリに変換
-# Cloud Runは自動的にCloudEventをHTTPリクエストに変換するため、
-# functions_frameworkの内部WSGIアプリケーションを使用
