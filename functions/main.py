@@ -157,16 +157,15 @@ def format_aika_response(raw_message, scores, user_id):
             scores.get('core_rotation', 0)
         ) / 4
         
-        # 重複を除去し、簡潔化
-        lines = raw_message.split('\n')
+        # Difyの返答を簡潔化（重複除去、最大3文まで）
+        sentences = [s.strip() for s in raw_message.replace('\n', '。').split('。') if s.strip()]
         seen = set()
-        unique_lines = []
-        for line in lines:
-            line_stripped = line.strip()
-            if line_stripped and line_stripped not in seen:
-                seen.add(line_stripped)
-                unique_lines.append(line_stripped)
-        cleaned_message = ' '.join(unique_lines[:5])  # 最大5行まで
+        unique_sentences = []
+        for s in sentences[:3]:  # 最大3文まで
+            if s and s not in seen:
+                seen.add(s)
+                unique_sentences.append(s)
+        dify_summary = ' '.join(unique_sentences) if unique_sentences else "動画を解析したわ。"
         
         # ツンデレ口調で整形
         if user_gender == 'female':
@@ -181,7 +180,12 @@ def format_aika_response(raw_message, scores, user_id):
         # 戦闘力評価
         if total_power >= 80:
             power_comment = f"戦闘力は{total_power:.0f}。まあまあね。"
-            reason = "パンチの速度とガードの安定性が良いわ。でも、もっと体幹の回転を意識して。"
+            if scores.get('punch_speed', 0) >= 80 and scores.get('guard_stability', 0) >= 70:
+                reason = "パンチの速度とガードの安定性が良いわ。でも、もっと体幹の回転を意識して。"
+            elif scores.get('kick_height', 0) >= 80:
+                reason = "キックの高さは良いわね。でも、ガードの安定性をもっと上げて。"
+            else:
+                reason = "全体的にバランスは取れてるけど、各項目をもう少し伸ばせるわ。"
         elif total_power >= 60:
             power_comment = f"戦闘力は{total_power:.0f}。まだまだね。"
             reason = "基本的な動きはできてるけど、キックの高さと体幹の回転が足りないわ。"
@@ -197,19 +201,23 @@ def format_aika_response(raw_message, scores, user_id):
             improvements.append("キックの高さを上げて")
         if scores.get('core_rotation', 0) < 70:
             improvements.append("体幹の回転を意識して")
+        if scores.get('punch_speed', 0) < 70:
+            improvements.append("パンチの速度を上げて")
         
         improvement_text = ""
         if improvements:
-            improvement_text = f"次は{'、'.join(improvements)}。"
+            improvement_text = f"次は{'、'.join(improvements[:3])}。"
         
         # ジムへの動線
         gym_message = "\n\nジムで直接見てもらいたい時は、いつでも来てね。一緒に練習しましょう。"
         
-        # 最終メッセージを組み立て
+        # 最終メッセージを組み立て（Difyの返答も含める）
         formatted = f"""{opening}
 
 {power_comment}
 {reason}
+
+{dify_summary}
 
 {improvement_text}
 
