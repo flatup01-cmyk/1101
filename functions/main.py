@@ -19,6 +19,7 @@ import requests
 import logging
 import hashlib
 import traceback
+import time
 import cv2
 from datetime import datetime
 from google.cloud import storage, firestore
@@ -149,9 +150,12 @@ def call_dify_via_mcp(scores, user_id):
         return None
     
     try:
+        # HTTPヘッダーはASCIIのみ（latin-1エンコーディングエラーを防ぐ）
         headers = {
             'Authorization': f'Bearer {DIFY_API_KEY}',
-            'Accept': 'application/json'
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'User-Agent': 'AIKA-Video-Analyzer/1.0'
         }
         
         # MCPプロトコル形式のリクエスト
@@ -182,15 +186,44 @@ def call_dify_via_mcp(scores, user_id):
         
         logger.info(f"📤 Dify MCP呼び出し: {json.dumps(payload, ensure_ascii=False)}")
         
-        response = requests.post(
-            DIFY_API_ENDPOINT,
-            headers=headers,
-            json=payload,
-            timeout=30
-        )
+        # リトライロジック（503/429エラー対応）
+        max_attempts = 3
+        backoff = 1.0
+        result = None
         
-        response.raise_for_status()
-        result = response.json()
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = requests.post(
+                    DIFY_API_ENDPOINT,
+                    headers=headers,
+                    json=payload,
+                    timeout=30
+                )
+                
+                # 503/429エラーの場合はリトライ
+                if response.status_code in (503, 429):
+                    if attempt < max_attempts:
+                        wait_time = backoff * (2 ** (attempt - 1))
+                        logger.warning(f"⚠️ Dify API returned {response.status_code}, retrying in {wait_time}s (attempt {attempt}/{max_attempts})")
+                        time.sleep(wait_time)
+                        continue
+                
+                response.raise_for_status()
+                result = response.json()
+                break
+                
+            except requests.exceptions.RequestException as e:
+                if attempt < max_attempts:
+                    wait_time = backoff * (2 ** (attempt - 1))
+                    logger.warning(f"⚠️ Dify API request failed, retrying in {wait_time}s (attempt {attempt}/{max_attempts}): {str(e)}")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    raise
+        
+        if result is None:
+            logger.error("❌ Dify API呼び出しが全て失敗しました")
+            return None
         
         # MCPスタイルのレスポンスを処理
         # Difyの標準レスポンスからメッセージを取得
