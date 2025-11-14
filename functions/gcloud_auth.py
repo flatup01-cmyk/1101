@@ -93,6 +93,45 @@ def validate_gcp_project_id(project_id: Optional[str] = None) -> str:
     return default_project_id
 
 
+def get_storage_client_with_auth():
+    """
+    Google Cloud Storageクライアントを取得（認証付き）
+    
+    Cloud Run環境では、デフォルトの認証情報が自動的に使用されます。
+    
+    Returns:
+        storage.Client: Storageクライアント
+    """
+    from google.cloud import storage
+    return storage.Client()
+
+
+def get_firestore_client_with_auth():
+    """
+    Google Cloud Firestoreクライアントを取得（認証付き）
+    
+    Cloud Run環境では、デフォルトの認証情報が自動的に使用されます。
+    
+    Returns:
+        firestore.Client: Firestoreクライアント
+    """
+    from google.cloud import firestore
+    return firestore.Client()
+
+
+def get_secret_manager_client_with_auth():
+    """
+    Google Cloud Secret Managerクライアントを取得（認証付き）
+    
+    Cloud Run環境では、デフォルトの認証情報が自動的に使用されます。
+    
+    Returns:
+        SecretManagerServiceClient: Secret Managerクライアント
+    """
+    from google.cloud.secretmanager_v1 import SecretManagerServiceClient
+    return SecretManagerServiceClient()
+
+
 # 将来的にVideo Intelligence APIを使用する場合の例
 """
 from google.cloud import videointelligence_v1
