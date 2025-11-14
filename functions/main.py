@@ -151,7 +151,7 @@ def call_dify_via_mcp(scores, user_id):
     try:
         headers = {
             'Authorization': f'Bearer {DIFY_API_KEY}',
-            'Content-Type': 'application/json'
+            'Accept': 'application/json'
         }
         
         # MCPプロトコル形式のリクエスト
