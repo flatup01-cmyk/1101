@@ -159,18 +159,34 @@ def call_dify_via_mcp(scores, user_id):
                 return value.encode('ascii', 'ignore').decode('ascii')
             return str(value).encode('ascii', 'ignore').decode('ascii')
         
-        # APIキーがASCII文字列であることを確認
-        api_key_ascii = ensure_ascii_header(DIFY_API_KEY)
+        # APIキーがASCII文字列であることを確認（確実に処理）
+        if not DIFY_API_KEY:
+            logger.error("❌ DIFY_API_KEYが空です")
+            return None
         
+        # APIキーを確実にASCII文字列に変換（非ASCII文字を除去）
+        api_key_ascii = DIFY_API_KEY.encode('ascii', 'ignore').decode('ascii')
+        if not api_key_ascii:
+            logger.error("❌ DIFY_API_KEYがASCII文字列に変換できませんでした")
+            return None
+        
+        # ヘッダーを構築（すべてASCII文字列）
+        auth_header_value = f'Bearer {api_key_ascii}'
         headers = {
-            'Authorization': f'Bearer {api_key_ascii}',
+            'Authorization': auth_header_value,
             'Accept': 'application/json',
             'Content-Type': 'application/json',
             'User-Agent': 'AIKA-Video-Analyzer/1.0'
         }
         
-        # すべてのヘッダー値をASCII文字列として確認
-        headers = {k: ensure_ascii_header(v) for k, v in headers.items()}
+        # すべてのヘッダー値をASCII文字列として確認（二重チェック）
+        safe_headers_dict = {}
+        for k, v in headers.items():
+            safe_key = str(k).encode('ascii', 'ignore').decode('ascii')
+            safe_value = str(v).encode('ascii', 'ignore').decode('ascii')
+            safe_headers_dict[safe_key] = safe_value
+        
+        headers = safe_headers_dict
         
         # MCPプロトコル形式のリクエスト
         # Difyの標準APIを使用し、MCP互換の形式でデータを送信
@@ -207,9 +223,20 @@ def call_dify_via_mcp(scores, user_id):
         
         for attempt in range(1, max_attempts + 1):
             try:
+                # requests.postの前に、ヘッダーを再度確認（確実にASCII文字列にする）
+                safe_headers = {}
+                for k, v in headers.items():
+                    # ヘッダーキーと値を確実にASCII文字列に変換
+                    safe_key = str(k).encode('ascii', 'ignore').decode('ascii')
+                    safe_value = str(v).encode('ascii', 'ignore').decode('ascii')
+                    safe_headers[safe_key] = safe_value
+                
+                # デバッグログ: ヘッダーを確認
+                logger.debug(f"📤 送信ヘッダー: {json.dumps(safe_headers, ensure_ascii=False)}")
+                
                 response = requests.post(
                     DIFY_API_ENDPOINT,
-                    headers=headers,
+                    headers=safe_headers,
                     json=payload,
                     timeout=30
                 )
@@ -709,32 +736,48 @@ def process_video(data, context):
             # 5. LINE Messaging APIでユーザーに送信（指数関数的バックオフ・リトライ付き）
             logger.info(f"📁 LINE送信開始: user_id={user_id}")
             line_sent = False
-            try:
-                send_line_message_with_retry(user_id, full_message, unique_id)
-                logger.info(f"✅ LINE送信成功（リトライ版）: user_id={user_id}")
-                line_sent = True
-            except Exception as send_error:
-                logger.error(f"❌ LINE送信エラー（リトライ後も失敗）: {str(send_error)}")
-                # フォールバック: 簡易版を試行
-                logger.info(f"🔄 フォールバック: 簡易版LINE送信を試行します...")
+            max_line_attempts = 5  # LINE送信は最大5回試行
+            
+            for line_attempt in range(1, max_line_attempts + 1):
                 try:
-                    if send_line_message_simple(user_id, full_message):
-                        logger.info(f"✅ LINE送信成功（フォールバック版）: user_id={user_id}")
+                    if line_attempt == 1:
+                        # 最初はリトライ版を試行
+                        send_line_message_with_retry(user_id, full_message, unique_id)
+                        logger.info(f"✅ LINE送信成功（リトライ版）: user_id={user_id}")
                         line_sent = True
+                        break
                     else:
-                        logger.error(f"❌ フォールバック版LINE送信も失敗しました")
-                except Exception as fallback_error:
-                    logger.error(f"❌ フォールバック版LINE送信エラー: {str(fallback_error)}")
+                        # 2回目以降は簡易版を試行
+                        if send_line_message_simple(user_id, full_message):
+                            logger.info(f"✅ LINE送信成功（簡易版・試行{line_attempt}回目）: user_id={user_id}")
+                            line_sent = True
+                            break
+                        else:
+                            logger.warning(f"⚠️ LINE送信失敗（簡易版・試行{line_attempt}回目）")
+                            if line_attempt < max_line_attempts:
+                                time.sleep(2 * line_attempt)  # 指数バックオフ
+                            continue
+                except Exception as send_error:
+                    logger.error(f"❌ LINE送信エラー（試行{line_attempt}回目）: {str(send_error)}")
+                    if line_attempt < max_line_attempts:
+                        time.sleep(2 * line_attempt)  # 指数バックオフ
+                        continue
+                    else:
+                        logger.error(f"❌ LINE送信が全て失敗しました（{max_line_attempts}回試行）")
             
             # LINE送信が失敗した場合でも、Firestoreには結果を保存（後で再送信可能）
             if not line_sent:
-                logger.warning(f"⚠️ LINE送信に失敗しましたが、処理は継続します。user_id={user_id}, unique_id={unique_id}")
+                logger.error(f"❌ CRITICAL: LINE送信に失敗しました。user_id={user_id}, unique_id={unique_id}")
                 # Firestoreに送信失敗フラグを記録
-                processing_doc_ref.set({
-                    'line_send_failed': True,
-                    'line_send_error': 'All retry attempts failed',
-                    'updated_at': firestore.SERVER_TIMESTAMP
-                }, merge=True)
+                try:
+                    processing_doc_ref.set({
+                        'line_send_failed': True,
+                        'line_send_error': 'All retry attempts failed',
+                        'line_send_attempts': max_line_attempts,
+                        'updated_at': firestore.SERVER_TIMESTAMP
+                    }, merge=True)
+                except Exception as firestore_error:
+                    logger.error(f"❌ Firestore更新も失敗: {str(firestore_error)}")
             
             # 【データ整合性】Firestoreを更新（分析結果とステータス）
             logger.info(f"📁 Firestore更新開始: unique_id={unique_id}")
