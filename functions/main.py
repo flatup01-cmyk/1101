@@ -152,26 +152,25 @@ DIFY_API_ENDPOINT = (
 )
 DIFY_APP_ID = os.environ.get('DIFY_APP_ID')  # オプション: DifyアプリID
 
-# DIFY_API_KEYはSecret Managerから読み込み（最優先・セキュリティ強化）
-# 環境変数はフォールバックとして使用（後方互換性のため）
-DIFY_API_KEY = None
-try:
-    # Secret Managerから読み込み（latestバージョンを使用）
-    DIFY_API_KEY = access_secret_version(
-        "DIFY_API_KEY",
-        PROJECT_ID,
-        version_id="latest"
-    ).strip()
-    logger.info("✅ DIFY_API_KEYをSecret Managerから読み込みました")
-except Exception as e:
-    logger.warning(f"⚠️ Secret ManagerからDIFY_API_KEYを読み込めませんでした: {str(e)}")
-    # フォールバック: 環境変数から読み込み
-    DIFY_API_KEY = os.environ.get('DIFY_API_KEY')
-    if DIFY_API_KEY:
-        logger.warning("⚠️ 環境変数からDIFY_API_KEYを読み込みました（フォールバック）")
-    else:
-        logger.error("❌ DIFY_API_KEYが設定されていません（Secret Managerと環境変数の両方で未設定）")
+# DIFY_API_KEYは環境変数から読み込み（Cloud RunではSecret Managerから環境変数として設定される）
+# 環境変数が設定されていない場合のみ、Secret Managerから直接読み込む（フォールバック）
+DIFY_API_KEY = os.environ.get('DIFY_API_KEY')
+if not DIFY_API_KEY:
+    try:
+        # 環境変数が設定されていない場合、Secret Managerから直接読み込み（フォールバック）
+        logger.warning("⚠️ 環境変数DIFY_API_KEYが設定されていません。Secret Managerから直接読み込みを試行します...")
+        DIFY_API_KEY = access_secret_version(
+            "DIFY_API_KEY",
+            PROJECT_ID,
+            version_id="latest"
+        ).strip()
+        logger.info("✅ DIFY_API_KEYをSecret Managerから直接読み込みました（フォールバック）")
+    except Exception as e:
+        logger.error(f"❌ Secret ManagerからDIFY_API_KEYを読み込めませんでした: {str(e)}")
+        logger.error("❌ DIFY_API_KEYが設定されていません（環境変数とSecret Managerの両方で未設定）")
         logger.error("Dify API連携は機能しませんが、動画解析は継続されます")
+else:
+    logger.info("✅ DIFY_API_KEYを環境変数から読み込みました（Cloud Run Secret Manager経由）")
 
 
 # --- AIKA返答整形関数 ---
