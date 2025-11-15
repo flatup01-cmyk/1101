@@ -260,6 +260,12 @@ def call_dify_via_mcp(scores, user_id):
         logger.error("Firebase Console → Functions → 環境変数で設定してください")
         return None
     
+    # デバッグログ: 環境変数の状態を確認（セキュリティのためマスク）
+    logger.info(f"📋 Dify API設定確認:")
+    logger.info(f"   - ENDPOINT: {DIFY_API_ENDPOINT}")
+    api_key_preview = DIFY_API_KEY[:10] + "..." if len(DIFY_API_KEY) > 10 else "（短すぎます）"
+    logger.info(f"   - API_KEY: {api_key_preview} (長さ: {len(DIFY_API_KEY)})")
+    
     try:
         # APIキーを確実にASCII文字列に変換（非ASCII文字を除去）
         # まず改行と空白を除去
@@ -271,6 +277,14 @@ def call_dify_via_mcp(scores, user_id):
         if not api_key_ascii:
             logger.error("❌ DIFY_API_KEYがASCII文字列に変換できませんでした")
             return None
+        
+        # クリーンアップ後のAPIキーの長さを確認
+        if len(api_key_ascii) != len(api_key_cleaned):
+            logger.warning(f"⚠️ APIキーから非ASCII文字を除去しました（元: {len(api_key_cleaned)}文字 → 後: {len(api_key_ascii)}文字）")
+        
+        # APIキーの先頭が正しい形式か確認（通常は "app-" で始まる）
+        if not api_key_ascii.startswith('app-'):
+            logger.warning(f"⚠️ DIFY_API_KEYが 'app-' で始まっていません: {api_key_ascii[:10]}...")
         
         # ヘッダーを構築（すべてASCII文字列、latin-1エンコーディングエラー対策）
         auth_header_value = f'Bearer {api_key_ascii}'
@@ -394,6 +408,24 @@ def call_dify_via_mcp(scores, user_id):
                                 raise requests.exceptions.HTTPError(f"HTTP {self.status_code}: {self.text[:200]}")
                     
                     response = Urllib3Response(urllib3_response)
+                    
+                    # 401エラーの場合は詳細なデバッグ情報を出力してリトライしない
+                    if response.status_code == 401:
+                        logger.error(f"❌ Dify API 401認証エラー詳細 (試行 {attempt}/{max_attempts}):")
+                        logger.error(f"   - API URL: {api_url}")
+                        logger.error(f"   - API Key 先頭10文字: {api_key_ascii[:10]}...")
+                        logger.error(f"   - API Key 長さ: {len(api_key_ascii)}")
+                        logger.error(f"   - レスポンス本文: {response.text[:500]}")
+                        try:
+                            error_json = response.json()
+                            logger.error(f"   - エラーレスポンス: {json.dumps(error_json, ensure_ascii=False)}")
+                        except:
+                            logger.error(f"   - エラーレスポンス（JSON解析失敗）: {response.text[:200]}")
+                        # 401エラーは認証の問題なので、リトライしても意味がない
+                        logger.error(f"❌ Dify API 401認証エラー: Access tokenが無効です。DIFY_API_KEYを確認してください。")
+                        result = None
+                        break
+                    
                 except Exception as urllib3_error:
                     # urllib3でエラーが発生した場合、requestsにフォールバック（最終手段）
                     logger.warning(f"⚠️ urllib3でエラーが発生、requestsにフォールバック: {str(urllib3_error)}")
@@ -434,6 +466,23 @@ def call_dify_via_mcp(scores, user_id):
                     prepared.headers.clear()
                     prepared.headers.update(safe_prepared_headers)
                     response = session.send(prepared, timeout=30)
+                
+                # 401エラーの場合は詳細な情報を出力してリトライしない
+                if response.status_code == 401:
+                    logger.error(f"❌ Dify API 401認証エラー (試行 {attempt}/{max_attempts})")
+                    logger.error(f"   - API URL: {api_url}")
+                    logger.error(f"   - API Key 先頭10文字: {api_key_ascii[:10]}...")
+                    logger.error(f"   - API Key 長さ: {len(api_key_ascii)}")
+                    logger.error(f"   - レスポンス本文: {response.text[:500]}")
+                    try:
+                        error_json = response.json()
+                        logger.error(f"   - エラーレスポンス: {json.dumps(error_json, ensure_ascii=False)}")
+                    except:
+                        logger.error(f"   - エラーレスポンス（JSON解析失敗）: {response.text[:200]}")
+                    # 401エラーは認証の問題なので、リトライしても意味がない
+                    logger.error(f"❌ Dify API 401認証エラー: Access tokenが無効です。DIFY_API_KEYを確認してください。")
+                    result = None
+                    break
                 
                 # 503/429エラーの場合はリトライ（指数バックオフ）
                 if response.status_code in (503, 429):
