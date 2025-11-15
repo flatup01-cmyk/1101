@@ -16,7 +16,6 @@ import json
 import tempfile
 import base64
 import requests
-import urllib3
 import logging
 import hashlib
 import traceback
@@ -108,24 +107,71 @@ def access_secret_version(secret_id, project_id, version_id="latest"):
 # プロジェクトIDを環境変数から取得（Cloud Run環境では自動設定される）
 PROJECT_ID = os.environ.get('GOOGLE_CLOUD_PROJECT') or os.environ.get('GCP_PROJECT') or 'aikaapp-584fa'
 
-# LINEアクセストークンはSecret Managerから読み込み（最優先・セキュリティ強化）
+# --- ASCIIサニタイズ関数（ヘッダー衛生管理）---
+def sanitize_api_key(api_key):
+    """
+    APIキーをASCII文字列にサニタイズ（改行・全角・不可視文字を除去）
+    
+    Args:
+        api_key: 元のAPIキー
+    
+    Returns:
+        str: サニタイズされたAPIキー（ASCII印字可能文字のみ）
+    
+    Raises:
+        ValueError: APIキーが空または無効な場合
+    """
+    if not api_key or not isinstance(api_key, str):
+        raise ValueError("API key must be a non-empty string")
+    
+    # まず改行と空白を除去
+    cleaned = api_key.strip().replace('\r\n', '').replace('\r', '').replace('\n', '')
+    if not cleaned:
+        raise ValueError("API key is empty after trimming")
+    
+    # ASCII文字のみを保持（非ASCII文字を除去）
+    ascii_only = cleaned.encode('ascii', 'ignore').decode('ascii')
+    
+    # 制御文字を除去（ASCII印字可能文字のみ: 0x20-0x7E）
+    sanitized = ''.join(c for c in ascii_only if 32 <= ord(c) <= 126)
+    
+    if not sanitized:
+        raise ValueError("API key contains no valid ASCII characters after sanitization")
+    
+    # 最終確認: ASCII印字可能文字のみかチェック
+    if not all(32 <= ord(c) <= 126 for c in sanitized):
+        raise ValueError("API key contains invalid characters after sanitization")
+    
+    return sanitized
 
-
-# Dify API設定（環境変数から・必須）
+# Dify API設定（Secret Manager優先、環境変数フォールバック）
 DIFY_API_ENDPOINT = (
     os.environ.get('DIFY_API_URL')
     or os.environ.get('DIFY_API_ENDPOINT')
     or 'https://api.dify.ai/v1/chat-messages'
 )
-DIFY_API_KEY = os.environ.get('DIFY_API_KEY')
 DIFY_APP_ID = os.environ.get('DIFY_APP_ID')  # オプション: DifyアプリID
 
-# 環境変数の検証（警告のみ、関数の実行は継続）
-if not DIFY_API_KEY:
-    logger.warning("⚠️ WARNING: DIFY_API_KEY環境変数が設定されていません")
-    logger.warning("Firebase Console → Functions → 環境変数で設定してください")
-    logger.warning("Dify API連携は機能しませんが、動画解析は継続されます")
-    # 本番環境では環境変数が必須だが、関数の実行は継続（エラーで停止しない）
+# DIFY_API_KEYはSecret Managerから読み込み（最優先・セキュリティ強化）
+# 環境変数はフォールバックとして使用（後方互換性のため）
+DIFY_API_KEY = None
+try:
+    # Secret Managerから読み込み（latestバージョンを使用）
+    DIFY_API_KEY = access_secret_version(
+        "DIFY_API_KEY",
+        PROJECT_ID,
+        version_id="latest"
+    ).strip()
+    logger.info("✅ DIFY_API_KEYをSecret Managerから読み込みました")
+except Exception as e:
+    logger.warning(f"⚠️ Secret ManagerからDIFY_API_KEYを読み込めませんでした: {str(e)}")
+    # フォールバック: 環境変数から読み込み
+    DIFY_API_KEY = os.environ.get('DIFY_API_KEY')
+    if DIFY_API_KEY:
+        logger.warning("⚠️ 環境変数からDIFY_API_KEYを読み込みました（フォールバック）")
+    else:
+        logger.error("❌ DIFY_API_KEYが設定されていません（Secret Managerと環境変数の両方で未設定）")
+        logger.error("Dify API連携は機能しませんが、動画解析は継続されます")
 
 
 # --- AIKA返答整形関数 ---
@@ -267,42 +313,35 @@ def call_dify_via_mcp(scores, user_id):
     logger.info(f"   - API_KEY: {api_key_preview} (長さ: {len(DIFY_API_KEY)})")
     
     try:
-        # APIキーを確実にASCII文字列に変換（非ASCII文字を除去）
-        # まず改行と空白を除去
-        api_key_cleaned = DIFY_API_KEY.strip().replace('\r\n', '').replace('\r', '').replace('\n', '')
-        # ASCII文字のみを保持
-        api_key_ascii = api_key_cleaned.encode('ascii', 'ignore').decode('ascii')
-        # 制御文字を除去（ASCII印字可能文字のみ: 0x20-0x7E）
-        api_key_ascii = ''.join(c for c in api_key_ascii if 32 <= ord(c) <= 126)
-        if not api_key_ascii:
-            logger.error("❌ DIFY_API_KEYがASCII文字列に変換できませんでした")
+        # APIキーをサニタイズ（ASCIIのみ、改行・全角・不可視文字を除去）
+        try:
+            api_key_sanitized = sanitize_api_key(DIFY_API_KEY)
+        except ValueError as e:
+            logger.error(f"❌ DIFY_API_KEYのサニタイズエラー: {str(e)}")
             return None
         
-        # クリーンアップ後のAPIキーの長さを確認
-        if len(api_key_ascii) != len(api_key_cleaned):
-            logger.warning(f"⚠️ APIキーから非ASCII文字を除去しました（元: {len(api_key_cleaned)}文字 → 後: {len(api_key_ascii)}文字）")
-        
         # APIキーの先頭が正しい形式か確認（通常は "app-" で始まる）
-        if not api_key_ascii.startswith('app-'):
-            logger.warning(f"⚠️ DIFY_API_KEYが 'app-' で始まっていません: {api_key_ascii[:10]}...")
+        if not api_key_sanitized.startswith('app-'):
+            logger.warning(f"⚠️ DIFY_API_KEYが 'app-' で始まっていません: {api_key_sanitized[:10]}...")
         
-        # ヘッダーを構築（すべてASCII文字列、latin-1エンコーディングエラー対策）
-        auth_header_value = f'Bearer {api_key_ascii}'
+        # ヘッダーを構築（ASCIIのみ、latin-1エンコーディングエラー対策）
+        # charset=utf-8は削除、User-Agentは短縮
         headers = {
-            'Authorization': auth_header_value,
-            'Accept': 'application/json',
-            'Content-Type': 'application/json; charset=utf-8',  # charset=utf-8を追加
-            'User-Agent': 'process-video-trigger/1.0'  # ASCIIのみ
+            'Authorization': f'Bearer {api_key_sanitized}',
+            'Content-Type': 'application/json',
+            'User-Agent': 'aika/1.0'
         }
         
-        # すべてのヘッダー値をASCII文字列として確認（二重チェック）
-        safe_headers_dict = {}
-        for k, v in headers.items():
-            safe_key = str(k).encode('ascii', 'ignore').decode('ascii')
-            safe_value = str(v).encode('ascii', 'ignore').decode('ascii')
-            safe_headers_dict[safe_key] = safe_value
-        
-        headers = safe_headers_dict
+        # すべてのヘッダー値がASCII文字列であることを確認
+        for k, v in list(headers.items()):
+            try:
+                # ASCII文字列としてエンコード可能か確認
+                str(k).encode('ascii')
+                str(v).encode('ascii')
+            except UnicodeEncodeError:
+                # ASCII文字列に変換できない場合は削除
+                logger.warning(f"⚠️ ヘッダー '{k}' をASCII文字列に変換できませんでした。削除します。")
+                del headers[k]
         
         # MCPプロトコル形式のリクエスト
         # Difyの標準APIを使用し、MCP互換の形式でデータを送信
@@ -332,6 +371,13 @@ def call_dify_via_mcp(scores, user_id):
         
         logger.info(f"📤 Dify MCP呼び出し: {json.dumps(payload, ensure_ascii=False)}")
         
+        # DIFY_APP_IDが設定されている場合はURLに追加
+        api_url = DIFY_API_ENDPOINT
+        if DIFY_APP_ID:
+            separator = '&' if '?' in api_url else '?'
+            api_url = f"{api_url}{separator}app_id={DIFY_APP_ID}"
+            logger.info(f"📤 Dify API URL (app_id付き): {api_url}")
+        
         # リトライロジック（503/429エラー対応）
         max_attempts = 3
         backoff = 1.0
@@ -339,140 +385,23 @@ def call_dify_via_mcp(scores, user_id):
         
         for attempt in range(1, max_attempts + 1):
             try:
-                # requests.postの前に、ヘッダーを再度確認（確実にASCII文字列にする）
-                safe_headers = {}
-                for k, v in headers.items():
-                    # ヘッダーキーと値を確実にASCII文字列に変換
-                    safe_key = str(k).encode('ascii', 'ignore').decode('ascii')
-                    safe_value = str(v).encode('ascii', 'ignore').decode('ascii')
-                    safe_headers[safe_key] = safe_value
-                
-                # デバッグログ: ヘッダーを確認
-                logger.debug(f"📤 送信ヘッダー: {json.dumps(safe_headers, ensure_ascii=False)}")
-                
-                # DIFY_APP_IDが設定されている場合はURLに追加
-                api_url = DIFY_API_ENDPOINT
-                if DIFY_APP_ID:
-                    separator = '&' if '?' in api_url else '?'
-                    api_url = f"{api_url}{separator}app_id={DIFY_APP_ID}"
-                    logger.info(f"📤 Dify API URL (app_id付き): {api_url}")
-                
-                # urllib3を直接使用して、latin-1エンコーディングエラーを完全に回避
                 logger.info(f"📤 Dify API呼び出し開始 (試行 {attempt}/{max_attempts})")
                 
-                # urllib3のHTTPConnectionPoolを使用
-                http = urllib3.PoolManager()
-                
-                # ヘッダーを確実にASCII文字列に変換（urllib3用）
-                urllib3_headers = {}
-                for k, v in safe_headers.items():
-                    # ヘッダーキーと値を確実にASCII文字列に変換
-                    safe_key = str(k).encode('ascii', 'ignore').decode('ascii')
-                    safe_value = str(v).encode('ascii', 'ignore').decode('ascii')
-                    # latin-1でエンコード可能か最終確認
-                    try:
-                        safe_key.encode('latin-1')
-                        safe_value.encode('latin-1')
-                        urllib3_headers[safe_key] = safe_value
-                    except UnicodeEncodeError:
-                        # エンコードできない場合は、ASCII文字のみを保持
-                        urllib3_headers[safe_key.encode('ascii', 'ignore').decode('ascii')] = safe_value.encode('ascii', 'ignore').decode('ascii')
-                        logger.warning(f"⚠️ ヘッダー '{safe_key}' の値をASCII文字列に変換しました")
-                
-                # JSONペイロードをエンコード
-                json_body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
-                
-                # urllib3でリクエストを送信
-                try:
-                    urllib3_response = http.request(
-                        'POST',
-                        api_url,
-                        headers=urllib3_headers,
-                        body=json_body,
-                        timeout=urllib3.Timeout(connect=10, read=30)
-                    )
-                    
-                    # urllib3のレスポンスをrequests.Response風のオブジェクトに変換
-                    class Urllib3Response:
-                        def __init__(self, urllib3_resp):
-                            self.status_code = urllib3_resp.status
-                            self.headers = urllib3_resp.headers
-                            self.text = urllib3_resp.data.decode('utf-8')
-                            self.content = urllib3_resp.data
-                        
-                        def json(self):
-                            return json.loads(self.text)
-                        
-                        def raise_for_status(self):
-                            if self.status_code >= 400:
-                                raise requests.exceptions.HTTPError(f"HTTP {self.status_code}: {self.text[:200]}")
-                    
-                    response = Urllib3Response(urllib3_response)
-                    
-                    # 401エラーの場合は詳細なデバッグ情報を出力してリトライしない
-                    if response.status_code == 401:
-                        logger.error(f"❌ Dify API 401認証エラー詳細 (試行 {attempt}/{max_attempts}):")
-                        logger.error(f"   - API URL: {api_url}")
-                        logger.error(f"   - API Key 先頭10文字: {api_key_ascii[:10]}...")
-                        logger.error(f"   - API Key 長さ: {len(api_key_ascii)}")
-                        logger.error(f"   - レスポンス本文: {response.text[:500]}")
-                        try:
-                            error_json = response.json()
-                            logger.error(f"   - エラーレスポンス: {json.dumps(error_json, ensure_ascii=False)}")
-                        except:
-                            logger.error(f"   - エラーレスポンス（JSON解析失敗）: {response.text[:200]}")
-                        # 401エラーは認証の問題なので、リトライしても意味がない
-                        logger.error(f"❌ Dify API 401認証エラー: Access tokenが無効です。DIFY_API_KEYを確認してください。")
-                        result = None
-                        break
-                    
-                except Exception as urllib3_error:
-                    # urllib3でエラーが発生した場合、requestsにフォールバック（最終手段）
-                    logger.warning(f"⚠️ urllib3でエラーが発生、requestsにフォールバック: {str(urllib3_error)}")
-                    # requests.Sessionを使用（最後の手段）
-                    # ヘッダーを再度ASCII文字列として確認
-                    final_headers = {}
-                    for k, v in urllib3_headers.items():
-                        final_key = str(k).encode('ascii', 'ignore').decode('ascii')
-                        final_value = str(v).encode('ascii', 'ignore').decode('ascii')
-                        final_headers[final_key] = final_value
-                    
-                    # JSONペイロードを文字列としてエンコード（json=パラメータを使わない）
-                    json_str = json.dumps(payload, ensure_ascii=False)
-                    json_bytes = json_str.encode('utf-8')
-                    
-                    # Content-Typeヘッダーを明示的に設定（charset=utf-8を追加）
-                    final_headers['Content-Type'] = 'application/json; charset=utf-8'
-                    
-                    session = requests.Session()
-                    req = requests.Request('POST', api_url, headers=final_headers, data=json_bytes)
-                    prepared = session.prepare_request(req)
-                    # ヘッダーを再度確認（latin-1エンコード可能なもののみ保持）
-                    safe_prepared_headers = {}
-                    for header_name, header_value in list(prepared.headers.items()):
-                        try:
-                            # ヘッダー名と値をlatin-1でエンコード可能か確認
-                            str(header_name).encode('latin-1')
-                            str(header_value).encode('latin-1')
-                            safe_prepared_headers[header_name] = header_value
-                        except UnicodeEncodeError:
-                            # エンコードできない場合はASCII文字のみを保持
-                            safe_name = str(header_name).encode('ascii', 'ignore').decode('ascii')
-                            safe_value = str(header_value).encode('ascii', 'ignore').decode('ascii')
-                            if safe_name and safe_value:
-                                safe_prepared_headers[safe_name] = safe_value
-                            logger.warning(f"⚠️ ヘッダー '{header_name}' をASCII文字列に変換しました（latin-1エンコード不可）")
-                    # 安全なヘッダーのみを使用
-                    prepared.headers.clear()
-                    prepared.headers.update(safe_prepared_headers)
-                    response = session.send(prepared, timeout=30)
+                # requests.postをjson=payloadで使用（latin-1対策）
+                # ヘッダーはASCIIのみ、json=payloadで自動的にContent-Typeが設定される
+                response = requests.post(
+                    api_url,
+                    headers=headers,
+                    json=payload,
+                    timeout=30
+                )
                 
                 # 401エラーの場合は詳細な情報を出力してリトライしない
                 if response.status_code == 401:
                     logger.error(f"❌ Dify API 401認証エラー (試行 {attempt}/{max_attempts})")
                     logger.error(f"   - API URL: {api_url}")
-                    logger.error(f"   - API Key 先頭10文字: {api_key_ascii[:10]}...")
-                    logger.error(f"   - API Key 長さ: {len(api_key_ascii)}")
+                    logger.error(f"   - API Key 先頭10文字: {api_key_sanitized[:10]}...")
+                    logger.error(f"   - API Key 長さ: {len(api_key_sanitized)}")
                     logger.error(f"   - レスポンス本文: {response.text[:500]}")
                     try:
                         error_json = response.json()
@@ -831,6 +760,7 @@ def process_video(data, context):
         # パス構造（2パターン対応）:
         # 1. videos/{userId}/{messageId}.mp4 (リッチメニューからの動画)
         # 2. videos/{userId}/{jobId}/{fileName} (LIFFアプリからの動画)
+        # 3. videos/{userId}/{messageId}.mp4 (LINEからの動画、リッチメニュー経由)
         path_parts = file_path.split('/')
         if len(path_parts) < 3:
             logger.error(f"❌ セキュリティ: パス構造が不正: {file_path}")
