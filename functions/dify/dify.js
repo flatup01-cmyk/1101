@@ -36,9 +36,19 @@ export async function analyzeVideoBlocking({ videoUrl, userId, conversationId })
     conversationId: conversationId ?? null,
   }));
 
+  // 【診断ログ】ヘッダー直前のASCII検査
+  const authHeader = `Bearer ${safeApiKey}`;
+  const authHeaderIsAscii = /^[\x20-\x7E]*$/.test(authHeader);
+  console.info(`🔍 [診断] Authorizationヘッダー検査: len=${authHeader.length}, asciiOnly=${authHeaderIsAscii}`);
+  if (!authHeaderIsAscii) {
+    const invalidChars = authHeader.split('').filter(c => !/[\x20-\x7E]/.test(c));
+    console.error(`❌ [診断] Authorizationヘッダーに非ASCII文字検出: ${JSON.stringify(invalidChars)}`);
+    throw new Error('Authorization header contains non-ASCII characters');
+  }
+
   // ヘッダーを厳密にASCIIのみで構成（ERR_INVALID_CHARエラー対策）
   const headers = {
-    'Authorization': `Bearer ${safeApiKey}`,
+    'Authorization': authHeader,
     'Content-Type': 'application/json',
     'User-Agent': 'process-video-job/1.0',
   };
@@ -71,21 +81,35 @@ export async function analyzeVideoBlocking({ videoUrl, userId, conversationId })
     }
     
     // 詳細なエラー情報をログ出力
-    console.error('Dify APIエラー詳細:', JSON.stringify({
+    console.error('❌ Dify Video APIエラー詳細:', JSON.stringify({
       status: res.status,
       statusText: res.statusText,
       errorBody: errorBody.substring(0, 500), // 最初の500文字のみ
       errorJson: errorJson,
+      apiUrl: apiUrl,
+      apiKeyLength: safeApiKey.length,
+      apiKeyPrefix: safeApiKey.substring(0, 10) + '...',
       videoUrl: videoUrl.substring(0, 100) + '...',
-      requestHeaders: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ***',
-      },
     }));
+    
+    // 401エラー（認証エラー）の場合は、詳細な情報を出力してフォールバックメッセージを返す
+    if (res.status === 401) {
+      console.error('❌ Dify Video API 401認証エラー: Access tokenが無効です。');
+      console.error(`   - API URL: ${apiUrl}`);
+      console.error(`   - API Key 長さ: ${safeApiKey.length}`);
+      console.error(`   - API Key 先頭10文字: ${safeApiKey.substring(0, 10)}...`);
+      console.error(`   - エラーレスポンス: ${JSON.stringify(errorJson || errorBody.substring(0, 200))}`);
+      // 401エラーは認証の問題なので、フォールバックメッセージを返す
+      return {
+        answer: buildFallbackAnswer('AIの認証エラーが発生しました。しばらく待ってから再度お試しください。'),
+        meta: {},
+        conversation_id: conversationId ?? null,
+      };
+    }
     
     // 500エラーの場合はフォールバックメッセージを返す
     if (res.status === 500) {
-      console.error(`Dify API 500エラー: ${errorMessage}`);
+      console.error(`❌ Dify Video API 500エラー: ${errorMessage}`);
       // エラーをスローせず、フォールバックメッセージを返す
       return {
         answer: buildFallbackAnswer('Dify APIで一時的なエラーが発生しました。しばらく待ってから再度お試しください。'),
@@ -96,7 +120,7 @@ export async function analyzeVideoBlocking({ videoUrl, userId, conversationId })
     
     // 400エラーの場合もフォールバックメッセージを返す（Dify APIの設定問題の可能性）
     if (res.status === 400) {
-      console.error(`Dify API 400エラー: ${errorMessage}`);
+      console.error(`❌ Dify Video API 400エラー: ${errorMessage}`);
       return {
         answer: buildFallbackAnswer('動画解析でエラーが発生しました。動画形式を確認して再度お試しください。'),
         meta: {},
@@ -104,7 +128,13 @@ export async function analyzeVideoBlocking({ videoUrl, userId, conversationId })
       };
     }
     
-    throw new Error(errorMessage);
+    // その他のエラーもフォールバックメッセージを返す（エラーをスローしない）
+    console.error(`❌ Dify Video API エラー (${res.status}): ${errorMessage}`);
+    return {
+      answer: buildFallbackAnswer('動画解析でエラーが発生しました。しばらく待ってから再度お試しください。'),
+      meta: {},
+      conversation_id: conversationId ?? null,
+    };
   }
 
   const json = await res.json();
@@ -171,9 +201,19 @@ export async function chatWithDify({ message, userId, conversationId }) {
     conversationId: conversationId ?? null,
   }));
 
+  // 【診断ログ】ヘッダー直前のASCII検査
+  const authHeader = `Bearer ${safeApiKey}`;
+  const authHeaderIsAscii = /^[\x20-\x7E]*$/.test(authHeader);
+  console.info(`🔍 [診断] Authorizationヘッダー検査: len=${authHeader.length}, asciiOnly=${authHeaderIsAscii}`);
+  if (!authHeaderIsAscii) {
+    const invalidChars = authHeader.split('').filter(c => !/[\x20-\x7E]/.test(c));
+    console.error(`❌ [診断] Authorizationヘッダーに非ASCII文字検出: ${JSON.stringify(invalidChars)}`);
+    throw new Error('Authorization header contains non-ASCII characters');
+  }
+
   // ヘッダーを厳密にASCIIのみで構成（ERR_INVALID_CHARエラー対策）
   const headers = {
-    'Authorization': `Bearer ${safeApiKey}`,
+    'Authorization': authHeader,
     'Content-Type': 'application/json',
     'User-Agent': 'line-webhook-router/1.0',
   };
@@ -195,16 +235,34 @@ export async function chatWithDify({ message, userId, conversationId }) {
       errorMessage += `: ${errorBody}`;
     }
     
-    console.error('Dify Chat APIエラー詳細:', JSON.stringify({
+    console.error('❌ Dify Chat APIエラー詳細:', JSON.stringify({
       status: res.status,
       statusText: res.statusText,
-      errorBody: errorBody,
+      errorBody: errorBody.substring(0, 500),
       errorJson: errorJson,
+      apiUrl: apiUrl,
+      apiKeyLength: safeApiKey.length,
+      apiKeyPrefix: safeApiKey.substring(0, 10) + '...',
     }));
+    
+    // 401エラー（認証エラー）の場合は、詳細な情報を出力
+    if (res.status === 401) {
+      console.error('❌ Dify Chat API 401認証エラー: Access tokenが無効です。');
+      console.error(`   - API URL: ${apiUrl}`);
+      console.error(`   - API Key 長さ: ${safeApiKey.length}`);
+      console.error(`   - API Key 先頭10文字: ${safeApiKey.substring(0, 10)}...`);
+      console.error(`   - エラーレスポンス: ${JSON.stringify(errorJson || errorBody.substring(0, 200))}`);
+      // 401エラーは認証の問題なので、フォールバックメッセージを返す
+      return {
+        answer: 'すみません、AIの認証エラーが発生しました。しばらく待ってから再度お試しください。',
+        meta: {},
+        conversation_id: conversationId ?? null,
+      };
+    }
     
     // 500エラーの場合はフォールバックメッセージを返す
     if (res.status === 500) {
-      console.error(`Dify Chat API 500エラー: ${errorMessage}`);
+      console.error(`❌ Dify Chat API 500エラー: ${errorMessage}`);
       return {
         answer: 'すみません、一時的なエラーが発生しました。しばらく待ってから再度お試しください。',
         meta: {},
@@ -263,9 +321,19 @@ export async function analyzeImage({ imageUrl, userId, conversationId }) {
     conversationId: conversationId ?? null,
   }));
 
+  // 【診断ログ】ヘッダー直前のASCII検査
+  const authHeader = `Bearer ${safeApiKey}`;
+  const authHeaderIsAscii = /^[\x20-\x7E]*$/.test(authHeader);
+  console.info(`🔍 [診断] Authorizationヘッダー検査: len=${authHeader.length}, asciiOnly=${authHeaderIsAscii}`);
+  if (!authHeaderIsAscii) {
+    const invalidChars = authHeader.split('').filter(c => !/[\x20-\x7E]/.test(c));
+    console.error(`❌ [診断] Authorizationヘッダーに非ASCII文字検出: ${JSON.stringify(invalidChars)}`);
+    throw new Error('Authorization header contains non-ASCII characters');
+  }
+
   // ヘッダーを厳密にASCIIのみで構成（ERR_INVALID_CHARエラー対策）
   const headers = {
-    'Authorization': `Bearer ${safeApiKey}`,
+    'Authorization': authHeader,
     'Content-Type': 'application/json',
     'User-Agent': 'line-webhook-router/1.0',
   };
@@ -287,17 +355,27 @@ export async function analyzeImage({ imageUrl, userId, conversationId }) {
       errorMessage += `: ${errorBody}`;
     }
 
-    console.error('Dify Image APIエラー詳細:', JSON.stringify({
+    console.error('❌ Dify Image APIエラー詳細:', JSON.stringify({
       status: res.status,
       statusText: res.statusText,
       errorBody: errorBody.substring(0, 500),
       errorJson: errorJson,
+      apiUrl: apiUrl,
+      apiKeyLength: safeApiKey.length,
+      apiKeyPrefix: safeApiKey.substring(0, 10) + '...',
       imageUrl: imageUrl.substring(0, 100) + '...',
-      requestHeaders: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ***',
-      },
     }));
+    
+    // 401エラー（認証エラー）の場合は、詳細な情報を出力
+    if (res.status === 401) {
+      console.error('❌ Dify Image API 401認証エラー: Access tokenが無効です。');
+      console.error(`   - API URL: ${apiUrl}`);
+      console.error(`   - API Key 長さ: ${safeApiKey.length}`);
+      console.error(`   - API Key 先頭10文字: ${safeApiKey.substring(0, 10)}...`);
+      console.error(`   - エラーレスポンス: ${JSON.stringify(errorJson || errorBody.substring(0, 200))}`);
+      // 401エラーは認証の問題なので、エラーを投げずにフォールバックを返す
+      throw new Error('Dify API authentication failed: Invalid access token');
+    }
 
     if (res.status === 500) {
       console.error(`Dify Image API 500エラー: ${errorMessage}`);

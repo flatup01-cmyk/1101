@@ -1,38 +1,45 @@
 #!/bin/bash
-# AIKA18号 バトルスコープ デプロイスクリプト（最短最速版）
+# Cloud Runデプロイスクリプト
 
-set -e
+set -e  # エラーが発生したら終了
 
-echo "=========================================="
-echo "🚀 AIKA18号 バトルスコープ デプロイ開始"
-echo "=========================================="
+echo "🚀 Cloud Runデプロイ開始..."
 
-# プロジェクトルートに移動
-cd "$(dirname "$0")"
+# プロジェクト設定
+PROJECT_ID="aikaapp-584fa"
+REGION="us-central1"
+SERVICE_NAME="process-video-trigger"
 
-# Firebase Storageルールをデプロイ
-echo ""
-echo "📋 Firebase Storageルールをデプロイ中..."
-firebase deploy --only storage || {
-    echo "⚠️ Storageルールのデプロイに失敗しました。続行します..."
-}
+# 現在のディレクトリを確認
+cd /Users/jin/new-kingdom
 
-# Firebase Functionsをデプロイ
-echo ""
-echo "📋 Firebase Functionsをデプロイ中..."
-firebase deploy --only functions || {
-    echo "⚠️ Functionsのデプロイに失敗しました。"
-    echo "   代替方法: DEPLOY_WITH_GCLOUD.md を参照してください"
-    exit 1
-}
+echo "📋 プロジェクト: $PROJECT_ID"
+echo "📋 リージョン: $REGION"
+echo "📋 サービス名: $SERVICE_NAME"
 
-echo ""
-echo "=========================================="
+# Cloud Runにデプロイ
+echo "📦 Cloud Runにデプロイ中..."
+gcloud run deploy $SERVICE_NAME \
+  --source=./functions \
+  --region=$REGION \
+  --platform=managed \
+  --allow-unauthenticated \
+  --memory=2Gi \
+  --timeout=540s \
+  --max-instances=10 \
+  --update-secrets DIFY_API_KEY=DIFY_API_KEY:prod \
+  --set-env-vars DIFY_API_ENDPOINT=https://api.dify.ai/v1/chat-messages \
+  --project=$PROJECT_ID
+
 echo "✅ デプロイ完了！"
-echo "=========================================="
-echo ""
-echo "次のステップ:"
-echo "1. Firebase Consoleでログを確認"
-echo "2. LIFFアプリで動画アップロードをテスト"
-echo "3. LINEで通知が届くことを確認"
 
+# サービス情報を表示
+echo "📊 サービス情報:"
+gcloud run services describe $SERVICE_NAME \
+  --region=$REGION \
+  --project=$PROJECT_ID \
+  --format="value(status.url)"
+
+echo ""
+echo "🔍 ログを確認:"
+echo "gcloud logging read \"resource.type=cloud_run_revision AND resource.labels.service_name=$SERVICE_NAME\" --limit=50 --project=$PROJECT_ID"

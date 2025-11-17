@@ -108,33 +108,66 @@ export async function handleVideoJob({
 
   let difyResult;
   try {
-    difyResult = await analyzer({ videoUrl, userId, conversationId });
+    // タイムアウトを設定（5分 = 300秒）
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Video analysis timeout (5 minutes)')), 5 * 60 * 1000);
+    });
+    
+    difyResult = await Promise.race([
+      analyzer({ videoUrl, userId, conversationId }),
+      timeoutPromise,
+    ]);
   } catch (error) {
-    console.error("動画解析処理でエラーが発生しました:", {
+    console.error("❌ 動画解析処理でエラーが発生しました:", {
       error: error.message,
       stack: error.stack,
       videoUrl: videoUrl.substring(0, 100) + '...',
       userId: userId,
+      errorName: error.name,
     });
     
-    // ユーザーにエラーメッセージを送信
-    const fallback = buildFallbackAnswer('解析処理でエラーが発生しました。動画の形式を確認して再度お試しください。');
-    try {
-      await sendLineMessage(lineUserId, fallback);
-      console.info("ユーザーへエラーメッセージを送信しました");
-    } catch (sendError) {
-      console.error("エラーメッセージの送信に失敗しました:", sendError.message);
+    // エラーの種類に応じてメッセージを変更
+    let errorMessage = '解析処理でエラーが発生しました。動画の形式を確認して再度お試しください。';
+    if (error.message.includes('timeout')) {
+      errorMessage = '動画解析がタイムアウトしました。動画が長すぎるか、サーバーが混雑している可能性があります。しばらく待ってから再度お試しください。';
+    } else if (error.message.includes('401') || error.message.includes('authentication')) {
+      errorMessage = 'AIの認証エラーが発生しました。しばらく待ってから再度お試しください。';
+    } else if (error.message.includes('400')) {
+      errorMessage = '動画形式が正しくない可能性があります。別の動画でお試しください。';
     }
     
-    await updateJobDocument(jobId, {
-      status: 'error',
-      error_message: error.message,
-      dify_mode: selectStreaming ? 'streaming' : 'blocking',
-      conversation_id: conversationId,
-      last_message: fallback,
-      ...extraJobData,
-    });
-    throw error;
+    // ユーザーにエラーメッセージを送信（必ず送信する）
+    const fallback = buildFallbackAnswer(errorMessage);
+    try {
+      await sendLineMessage(lineUserId, fallback);
+      console.info("✅ ユーザーへエラーメッセージを送信しました");
+    } catch (sendError) {
+      console.error("❌ エラーメッセージの送信に失敗しました:", sendError.message);
+      // エラーメッセージの送信に失敗しても、処理は継続する
+    }
+    
+    // Firestoreにエラー状態を記録
+    try {
+      await updateJobDocument(jobId, {
+        status: 'error',
+        error_message: error.message,
+        dify_mode: selectStreaming ? 'streaming' : 'blocking',
+        conversation_id: conversationId,
+        last_message: fallback,
+        ...extraJobData,
+      });
+      console.info("✅ Firestoreにエラー状態を記録しました");
+    } catch (firestoreError) {
+      console.error("❌ Firestore更新に失敗しました:", firestoreError.message);
+      // Firestore更新に失敗しても、処理は継続する
+    }
+    
+    // エラーをスローせず、フォールバックメッセージを返す（必ず何らかの結果を返す）
+    return {
+      answer: fallback,
+      meta: {},
+      conversation_id: conversationId ?? null,
+    };
   }
 
   const { answer, meta, conversation_id: newConversationId } = difyResult;

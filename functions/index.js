@@ -430,7 +430,7 @@ export const lineWebhookRouter = onRequest(
 export const processVideoJob = onRequest(
   {
     secrets: ["DIFY_API_KEY", "LINE_CHANNEL_ACCESS_TOKEN"],
-    timeoutSeconds: 180,
+    timeoutSeconds: 540, // 9分（動画解析に時間がかかるため）
   },
   async (req, res) => {
     // LINE Webhookのリクエストを無視（lineWebhookRouterで処理済み）
@@ -445,15 +445,19 @@ export const processVideoJob = onRequest(
       
       // 必須パラメータの検証
       if (!videoUrl) {
-        throw new Error("videoUrl is required");
+        console.error("❌ processVideoJob: videoUrlが設定されていません");
+        res.status(400).json({ ok: false, error: "videoUrl is required" });
+        return;
       }
       if (!lineUserId) {
-        throw new Error("lineUserId is required");
+        console.error("❌ processVideoJob: lineUserIdが設定されていません");
+        res.status(400).json({ ok: false, error: "lineUserId is required" });
+        return;
       }
       
-      console.info(`processVideoJob開始: jobId=${jobId}, lineUserId=${lineUserId}, videoUrl=${videoUrl}`);
+      console.info(`🚀 processVideoJob開始: jobId=${jobId}, lineUserId=${lineUserId}, videoUrl=${videoUrl.substring(0, 100)}...`);
       
-      // handleVideoJobを呼び出し
+      // handleVideoJobを呼び出し（エラーが発生しても、必ず何らかの結果を返す）
       const result = await handleVideoJob({
         jobId: jobId || lineUserId,
         userId: lineUserId,
@@ -464,11 +468,29 @@ export const processVideoJob = onRequest(
         extraJobData: {},
       });
       
-      console.info("processVideoJob成功:", JSON.stringify(result));
+      console.info("✅ processVideoJob成功:", JSON.stringify({
+        answerLength: result.answer?.length || 0,
+        conversationId: result.conversation_id || null,
+        hasMeta: !!result.meta,
+      }));
+      
+      // 成功時もエラー時も、必ず200を返す（handleVideoJob内でユーザーにメッセージを送信済み）
       res.status(200).json({ ok: true, result });
     } catch (error) {
-      console.error("processVideoJobでエラー:", error);
-      res.status(500).json({ ok: false, error: error.message });
+      // このエラーは、handleVideoJob内で既に処理されているはず
+      // しかし、予期しないエラーが発生した場合は、ここで処理する
+      console.error("❌ processVideoJobで予期しないエラー:", {
+        error: error.message,
+        stack: error.stack,
+        name: error.name,
+      });
+      
+      // エラーが発生しても、必ず200を返す（ユーザーへの通知はhandleVideoJob内で行われている）
+      res.status(200).json({ 
+        ok: false, 
+        error: error.message,
+        message: "エラーが発生しましたが、ユーザーには通知済みです。"
+      });
     }
   }
 );

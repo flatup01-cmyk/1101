@@ -82,25 +82,30 @@ def get_secret_client():
     return _secret_client
 
 # --- Secret Manager Access Function ---
-def access_secret_version(secret_id, project_id, version_id="latest"):
+def access_secret_version(secret_id, project_id, version_id="prod"):
     """
     Secret Managerからシークレットを取得
     
     Args:
         secret_id: シークレット名
         project_id: GCPプロジェクトID
-        version_id: バージョン（デフォルト: latest）
+        version_id: バージョンまたはエイリアス（デフォルト: prod）
+                    - "prod": 本番環境用エイリアス
+                    - "staging": ステージング環境用エイリアス
+                    - "latest": 最新バージョン（非推奨）
+                    - 数値: 特定バージョン（例: "8"）
     
     Returns:
         str: シークレットの値
     """
     try:
         client = get_secret_client()
+        # エイリアスまたはバージョン番号を指定
         name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
         response = client.access_secret_version(name=name)
         return response.payload.data.decode('UTF-8')
     except Exception as e:
-        logger.error(f"Secret Manager読み込みエラー ({secret_id}): {str(e)}")
+        logger.error(f"Secret Manager読み込みエラー ({secret_id}, version={version_id}): {str(e)}")
         raise
 
 # --- Load Secrets at Runtime ---
@@ -124,23 +129,52 @@ def sanitize_api_key(api_key):
     if not api_key or not isinstance(api_key, str):
         raise ValueError("API key must be a non-empty string")
     
-    # まず改行と空白を除去
+    # デバッグ情報: APIキーの長さをログに出力（マスク）
+    original_length = len(api_key)
+    if original_length >= 10:
+        prefix = api_key[:10]
+        masked_prefix = prefix[:3] + '***' + prefix[-2:]
+    else:
+        masked_prefix = api_key[:3] + '***' if len(api_key) > 3 else '***'
+    logger.info(f"🔑 APIキー検証: 長さ={original_length}, 先頭10文字={masked_prefix}...")
+    
+    # まず改行と先頭・末尾の空白を除去
     cleaned = api_key.strip().replace('\r\n', '').replace('\r', '').replace('\n', '')
     if not cleaned:
+        logger.error("❌ APIキーが空です（トリミング後）")
         raise ValueError("API key is empty after trimming")
+    
+    # サニタイズ前の長さを記録
+    before_sanitize_length = len(cleaned)
     
     # ASCII文字のみを保持（非ASCII文字を除去）
     ascii_only = cleaned.encode('ascii', 'ignore').decode('ascii')
     
     # 制御文字を除去（ASCII印字可能文字のみ: 0x20-0x7E）
+    # 制御文字（0x00-0x1F, 0x7F）と非ASCII文字（0x80-0xFF）を除去
     sanitized = ''.join(c for c in ascii_only if 32 <= ord(c) <= 126)
     
+    # サニタイズ後の長さを記録
+    after_sanitize_length = len(sanitized)
+    
     if not sanitized:
+        logger.error(f"❌ APIキーサニタイズ後が空: 元の長さ={original_length}, トリミング後={before_sanitize_length}, サニタイズ後={after_sanitize_length}")
         raise ValueError("API key contains no valid ASCII characters after sanitization")
     
     # 最終確認: ASCII印字可能文字のみかチェック
     if not all(32 <= ord(c) <= 126 for c in sanitized):
+        logger.error(f"❌ APIキーに無効な文字が含まれています: 長さ={len(sanitized)}, 先頭10文字={sanitized[:10]}")
+        # 無効な文字を検出
+        invalid_chars = [c for c in sanitized if not (32 <= ord(c) <= 126)]
+        logger.error(f"❌ 無効な文字: {invalid_chars}")
         raise ValueError("API key contains invalid characters after sanitization")
+    
+    # サニタイズ前後で長さが変わった場合、警告を出力
+    if before_sanitize_length != after_sanitize_length:
+        removed_count = before_sanitize_length - after_sanitize_length
+        logger.warning(f"⚠️ APIキーの長さが変更されました: {before_sanitize_length} → {after_sanitize_length} ({removed_count}文字削除)")
+    
+    logger.info(f"✅ APIキーサニタイズ成功: 長さ={len(sanitized)}")
     
     return sanitized
 
@@ -162,7 +196,7 @@ if not DIFY_API_KEY:
         DIFY_API_KEY = access_secret_version(
             "DIFY_API_KEY",
             PROJECT_ID,
-            version_id="latest"
+            version_id="prod"
         ).strip()
         logger.info("✅ DIFY_API_KEYをSecret Managerから直接読み込みました（フォールバック）")
     except Exception as e:
@@ -328,7 +362,7 @@ def call_dify_via_mcp(scores, user_id):
         headers = {
             'Authorization': f'Bearer {api_key_sanitized}',
             'Content-Type': 'application/json',
-            'User-Agent': 'aika/1.0'
+            'User-Agent': 'process-video-trigger/1.0'  # 短いASCII文字列
         }
         
         # すべてのヘッダー値がASCII文字列であることを確認
@@ -386,14 +420,32 @@ def call_dify_via_mcp(scores, user_id):
             try:
                 logger.info(f"📤 Dify API呼び出し開始 (試行 {attempt}/{max_attempts})")
                 
+                # 【診断ログ】ヘッダー直前のASCII検査
+                auth_header_value = headers.get('Authorization', '')
+                auth_header_is_ascii = all(32 <= ord(c) <= 126 for c in auth_header_value)
+                logger.info(f"🔍 [診断] Authorizationヘッダー検査: len={len(auth_header_value)}, asciiOnly={auth_header_is_ascii}")
+                if not auth_header_is_ascii:
+                    invalid_chars = [c for c in auth_header_value if not (32 <= ord(c) <= 126)]
+                    logger.error(f"❌ [診断] Authorizationヘッダーに非ASCII文字検出: {invalid_chars}")
+                    raise ValueError('Authorization header contains non-ASCII characters')
+                
+                # すべてのヘッダー値がASCIIであることを再確認
+                for k, v in headers.items():
+                    if not all(32 <= ord(c) <= 126 for c in str(v)):
+                        invalid_chars = [c for c in str(v) if not (32 <= ord(c) <= 126)]
+                        logger.error(f"❌ [診断] ヘッダー '{k}' に非ASCII文字検出: {invalid_chars}")
+                        raise ValueError(f'Header {k} contains non-ASCII characters')
+                
                 # requests.postをjson=payloadで使用（latin-1対策）
                 # ヘッダーはASCIIのみ、json=payloadで自動的にContent-Typeが設定される
+                logger.info(f"🔍 [診断] リクエスト送信: url={api_url}, headers={list(headers.keys())}")
                 response = requests.post(
                     api_url,
                     headers=headers,
                     json=payload,
                     timeout=30
                 )
+                logger.info(f"🔍 [診断] レスポンス受信: status={response.status_code}")
                 
                 # 401エラーの場合は詳細な情報を出力してリトライしない
                 if response.status_code == 401:
@@ -532,10 +584,10 @@ def send_line_message_simple(user_id, message):
         bool: 成功した場合True、失敗した場合False（例外は発生させない）
     """
     try:
-        # Secret ManagerからLINEアクセストークンを取得（latestバージョンを使用）
-        # 複数のバージョンを試行して確実に取得
+        # Secret ManagerからLINEアクセストークンを取得（prodエイリアスを使用）
+        # フォールバックとしてlatestも試行
         LINE_CHANNEL_ACCESS_TOKEN = None
-        for version_id in ["latest", "4"]:
+        for version_id in ["prod", "latest"]:
             try:
                 LINE_CHANNEL_ACCESS_TOKEN = access_secret_version(
                     "LINE_CHANNEL_ACCESS_TOKEN",
@@ -543,10 +595,10 @@ def send_line_message_simple(user_id, message):
                     version_id=version_id
                 ).strip()
                 if LINE_CHANNEL_ACCESS_TOKEN:
-                    logger.info(f"✅ LINEアクセストークン取得成功（バージョン: {version_id}）")
+                    logger.info(f"✅ LINEアクセストークン取得成功（エイリアス/バージョン: {version_id}）")
                     break
             except Exception as e:
-                logger.warning(f"⚠️ バージョン{version_id}の取得に失敗: {str(e)}")
+                logger.warning(f"⚠️ エイリアス/バージョン{version_id}の取得に失敗: {str(e)}")
                 continue
         
         if not LINE_CHANNEL_ACCESS_TOKEN:
@@ -610,10 +662,10 @@ def send_line_message_with_retry(user_id, message, unique_id):
         bool: 成功した場合True
     """
     try:
-        # Secret ManagerからLINEアクセストークンを取得（latestバージョンを使用）
-        # 複数のバージョンを試行して確実に取得
+        # Secret ManagerからLINEアクセストークンを取得（prodエイリアスを使用）
+        # フォールバックとしてlatestも試行
         LINE_CHANNEL_ACCESS_TOKEN = None
-        for version_id in ["latest", "4"]:
+        for version_id in ["prod", "latest"]:
             try:
                 LINE_CHANNEL_ACCESS_TOKEN = access_secret_version(
                     "LINE_CHANNEL_ACCESS_TOKEN",
@@ -621,10 +673,10 @@ def send_line_message_with_retry(user_id, message, unique_id):
                     version_id=version_id
                 ).strip()
                 if LINE_CHANNEL_ACCESS_TOKEN:
-                    logger.info(f"✅ LINEアクセストークン取得成功（バージョン: {version_id}）")
+                    logger.info(f"✅ LINEアクセストークン取得成功（エイリアス/バージョン: {version_id}）")
                     break
             except Exception as e:
-                logger.warning(f"⚠️ バージョン{version_id}の取得に失敗: {str(e)}")
+                logger.warning(f"⚠️ エイリアス/バージョン{version_id}の取得に失敗: {str(e)}")
                 continue
         
         if not LINE_CHANNEL_ACCESS_TOKEN:
