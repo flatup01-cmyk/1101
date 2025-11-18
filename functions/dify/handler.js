@@ -137,7 +137,19 @@ export async function handleVideoJob({
     }
     
     // ユーザーにエラーメッセージを送信（必ず送信する）
-    const fallback = buildFallbackAnswer(errorMessage);
+    // エラーの種類に応じて適切な英語メッセージを生成
+    let englishErrorMessage = '';
+    if (error.message.includes('timeout')) {
+      englishErrorMessage = 'Video analysis timed out. The video may be too long or the server is busy. Please wait a moment and try again.';
+    } else if (error.message.includes('401') || error.message.includes('authentication')) {
+      englishErrorMessage = 'Authentication error occurred. Please wait a moment and try again.';
+    } else if (error.message.includes('400')) {
+      englishErrorMessage = 'An error occurred during video processing. Please check the video format and try again with a different video.';
+    } else {
+      englishErrorMessage = 'An error occurred during video processing. Please check the video format and try again.';
+    }
+    
+    const fallback = buildFallbackAnswer(errorMessage, englishErrorMessage);
     try {
       await sendLineMessage(lineUserId, fallback);
       console.info("✅ ユーザーへエラーメッセージを送信しました");

@@ -251,7 +251,8 @@ export const lineWebhookRouter = onRequest(
                            event.source?.type === 'group' ? 'グループ' :
                            event.source?.type === 'room' ? 'トークルーム' : '不明';
         const sourceInfo = event.source?.userId ? `userId: ${event.source.userId}` : 'userId不明';
-        console.info(`動画メッセージを検知。処理を開始します。(動画ID: ${event.message.id}, ソース: ${sourceType}, ${sourceInfo})`);
+        const hasReplyToken = !!event.replyToken && event.replyToken !== LINE_VERIFY_REPLY_TOKEN;
+        console.info(`動画メッセージを検知。処理を開始します。(動画ID: ${event.message.id}, ソース: ${sourceType}, ${sourceInfo}, replyToken有無: ${hasReplyToken})`);
 
         // 動画処理のエラーハンドリング: 全ての処理をtry/catchで包み、エラーを確実に捕捉
         try {
@@ -260,9 +261,24 @@ export const lineWebhookRouter = onRequest(
             type: 'text',
             text: '動画を受け付けました！AIが解析を開始します。\n\n結果が届くまで、しばらくお待ちください…\n\n※解析は20秒以内/100MB以下の動画が対象です。'
           };
-          // このawaitで、返信が終わるまで待つ
-          await lineClient.replyMessage(event.replyToken, replyMessage);
-          console.info("ユーザーへの受付完了メッセージの送信に成功しました。");
+          
+          // replyTokenが存在する場合はreplyMessageを使用、ない場合はpushMessageを使用
+          // リッチメニューからの動画の場合、replyTokenが存在しないことがある
+          if (hasReplyToken) {
+            try {
+              await lineClient.replyMessage(event.replyToken, replyMessage);
+              console.info("ユーザーへの受付完了メッセージの送信に成功しました（replyMessage使用）。");
+            } catch (replyError) {
+              // replyMessageが失敗した場合（replyTokenが無効など）、pushMessageにフォールバック
+              console.warn(`replyMessage失敗、pushMessageにフォールバック: ${replyError.message}`);
+              await lineClient.pushMessage(event.source.userId, replyMessage);
+              console.info("ユーザーへの受付完了メッセージの送信に成功しました（pushMessage使用）。");
+            }
+          } else {
+            // replyTokenが存在しない場合（リッチメニュー経由など）、pushMessageを使用
+            await lineClient.pushMessage(event.source.userId, replyMessage);
+            console.info("ユーザーへの受付完了メッセージの送信に成功しました（pushMessage使用、replyTokenなし）。");
+          }
           
           // 2. ユーザーへの返信が終わってから、LINEに「OK」と応答する
           res.status(200).send('OK');

@@ -92,9 +92,23 @@ export function sanitizeApiKey(apiKey) {
 
 export function buildFallbackAnswer(japaneseMessage, englishMessage) {
   const jp = japaneseMessage?.trim() || '現在処理が混雑しています。しばらくしてから再度お試しください。';
-  const en =
-    englishMessage?.trim() ||
-    'Processing is currently busy. Please wait a bit and try again.';
+  
+  // 英語メッセージが指定されていない場合、日本語メッセージに基づいて適切な英語メッセージを生成
+  let en = englishMessage?.trim();
+  if (!en) {
+    if (jp.includes('認証エラー')) {
+      en = 'Authentication error occurred. Please wait a moment and try again.';
+    } else if (jp.includes('タイムアウト')) {
+      en = 'Video analysis timed out. The video may be too long or the server is busy. Please wait a moment and try again.';
+    } else if (jp.includes('動画形式') || jp.includes('形式を確認')) {
+      en = 'An error occurred during video processing. Please check the video format and try again with a different video.';
+    } else if (jp.includes('混雑')) {
+      en = 'The service is currently busy. Please wait a moment and try again.';
+    } else {
+      en = 'An error occurred during processing. Please try again later.';
+    }
+  }
+  
   return `${jp}\n\n--- Analysis Results (English) ---\n${en}`;
 }
 

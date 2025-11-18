@@ -1238,3 +1238,51 @@ def process_video_trigger(cloud_event):
         return {"status": "error", "reason": str(e)}
 
 
+# Cloud Run HTTPエンドポイント（CloudEvent形式のリクエストを受け取る）
+@functions_framework.http
+def app(request):
+    """
+    Cloud Run HTTPエンドポイント
+    
+    Cloud StorageからのCloudEvent形式のHTTPリクエストを受け取り、
+    process_video_trigger関数に渡します。
+    """
+    try:
+        # CloudEvent形式のリクエストを処理
+        if request.method == 'POST':
+            # リクエストボディを取得
+            if request.is_json:
+                event_data = request.get_json()
+            else:
+                # JSON以外の場合はテキストとして取得
+                event_data = request.get_data(as_text=True)
+                try:
+                    event_data = json.loads(event_data)
+                except json.JSONDecodeError:
+                    # Base64エンコードされている可能性がある
+                    try:
+                        decoded_bytes = base64.b64decode(event_data)
+                        event_data = json.loads(decoded_bytes.decode('utf-8'))
+                    except:
+                        logger.error(f"❌ リクエストボディの解析に失敗: {event_data[:500]}")
+                        return {"status": "error", "reason": "invalid request body"}, 400
+            
+            # CloudEvent形式のデータを構築
+            cloud_event = {
+                'attributes': {
+                    'type': request.headers.get('Ce-Type', 'google.cloud.storage.object.v1.finalized'),
+                    'source': request.headers.get('Ce-Source', '//storage.googleapis.com'),
+                },
+                'data': event_data
+            }
+            
+            # process_video_trigger関数を呼び出し
+            result = process_video_trigger(cloud_event)
+            return result, 200
+        else:
+            return {"status": "error", "reason": "method not allowed"}, 405
+    except Exception as e:
+        logger.error(f"❌ HTTPエンドポイントエラー: {e}")
+        traceback.print_exc()
+        return {"status": "error", "reason": str(e)}, 500
+
